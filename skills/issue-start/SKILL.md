@@ -59,12 +59,20 @@ GH_HOST=<host> gh api graphql -f query='
         number: .content.number,
         title: .content.title,
         url: .content.url,
+        repo: (.content.url | capture("https?://[^/]+/(?P<r>[^/]+/[^/]+)/issues/").r),
         stage: (.fieldValues.nodes[] | select(.field.name=="Status") | .name)
       }
     | select(.stage=="Todo")]
     | sort_by(.number)[]
-    | "#\(.number) \(.title)"'
+    | "#\(.number) [\(.repo)] \(.title)"'
 ```
+
+> **Cross-repo issues:** Project boards can contain issues from any repository in the
+> organisation — not just the repo you cloned. This is intentional: a finding filed in
+> a QA/test repo (e.g. from a stress-test run) may be tracked on the development-support
+> board when the fix lives in the main repo. Always parse the issue `url` to determine
+> the actual `owner/repo`, and use that repo (not the current git repo) in all subsequent
+> `gh issue view`, `gh issue edit`, and API calls for that item.
 
 Also list any issues with `needs-human` label so the user is aware of blockers:
 ```bash
@@ -100,9 +108,14 @@ Flag any PR that clearly overlaps with the chosen issue before proceeding.
 
 ## Step 4 — Activate the issue
 
+> **Cross-repo note:** `<issue_repo>` below is the repo extracted from the issue URL in
+> Step 2 (e.g. `<org>/<qa-repo>`). It may differ from the git repo you are
+> currently cloned in — that is intentional and expected. Use `<issue_repo>` for all issue
+> reads, edits, and API calls; use the current git repo only for code changes and PRs.
+
 1. Read the full issue body and all comments:
    ```bash
-   GH_HOST=<host> gh issue view <N> --repo <repo> --comments
+   GH_HOST=<host> gh issue view <N> --repo <issue_repo> --comments
    ```
    Comments often contain human decisions that override or refine the original body.
 

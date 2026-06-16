@@ -1,10 +1,10 @@
 ---
 name: ci-pipeline-debug
 description: Debugs failing GitHub Actions pipelines on the self-hosted Yocto runners
-             (<ci-runner-ip>, ci user, <runner-agent> / ><runner-agent-2>). Covers fetching
+             (<ci-runner-ip>, ci user, <runner-agent> / <runner-agent-2>). Covers fetching
              failed job logs, identifying error patterns, fixing stale runner workspaces,
              submodule mismatches, sstate version conflicts, and triggering reruns.
-             Use when a pipeline fails or behaves unexpectedly on the Roomboard CI.
+             Use when a pipeline fails or behaves unexpectedly on the <product> CI.
 ---
 
 # Skill: CI Pipeline Debug
@@ -15,7 +15,7 @@ description: Debugs failing GitHub Actions pipelines on the self-hosted Yocto ru
 |------|-------|
 | Runner host | `<ci-runner-ip>` (SSH as `ci` user) |
 | HW1 runner | `~/<runner-agent>/` — label `hw1-yocto` |
-| HW2 runner | `~/><runner-agent-2>/` — label `hw2-yocto` |
+| HW2 runner | `~/<runner-agent-2>/` — label `hw2-yocto` |
 | Build dirs | `~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw{1,2}>/` |
 | Repo | `custom-repo/roomboard-linux` on `github.com` |
 | GH CLI | Always pass `GH_HOST=github.com` |
@@ -56,7 +56,7 @@ ssh ci@<ci-runner-ip> "
 for dir in \
   ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw1> \
   ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw2> \
-  ~/><runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>; do
+  ~/<runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>; do
   echo \"--- \$dir ---\"
   cd \"\$dir\" && git submodule update --remote docker-yocto-env && echo ok
 done"
@@ -86,7 +86,7 @@ ssh ci@<ci-runner-ip> "find ~ -maxdepth 5 -name 'cst-3.1.0.tgz' 2>/dev/null"
 
 # Copy from another build dir if available
 ssh ci@<ci-runner-ip> "cp ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw1>/cst-3.1.0.tgz \
-  ~/><runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/"
+  ~/<runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/"
 
 # If missing entirely — restore from git LFS history
 cd ~/ws/platform/<repo>
@@ -106,7 +106,7 @@ fatal QA error.
 **Fix:** Clear the affected recipe's sstate on the runner:
 ```bash
 ssh ci@<ci-runner-ip> "
-BUILD_DIR=~/><runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>
+BUILD_DIR=~/<runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>
 cd \"\$BUILD_DIR\"
 zsh -c '. ./env > /dev/null && poky run <build-target> \
   bitbake linux-variscite -c cleansstate'
@@ -213,7 +213,7 @@ git push origin <branch>
 
 ```bash
 # Find all docker-yocto-env copies and check their commit
-ssh ci@<ci-runner-ip> "find ~/<runner-agent> ~/><runner-agent-2> -name 'docker-yocto-env' -type d 2>/dev/null"
+ssh ci@<ci-runner-ip> "find ~/<runner-agent> ~/<runner-agent-2> -name 'docker-yocto-env' -type d 2>/dev/null"
 
 # Check submodule commit in a build dir
 ssh ci@<ci-runner-ip> "git -C ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw1> submodule status docker-yocto-env"
@@ -222,7 +222,7 @@ ssh ci@<ci-runner-ip> "git -C ~/<runner-agent>/_work/roomboard-linux/builds/<bui
 ssh ci@<ci-runner-ip> "ls ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw1>/"
 
 # Check sstate dir location
-ssh ci@<ci-runner-ip> "grep SSTATE_DIR ~/><runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/<build-target>/conf/local.conf"
+ssh ci@<ci-runner-ip> "grep SSTATE_DIR ~/<runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/<build-target>/conf/local.conf"
 ```
 
 ---
@@ -236,7 +236,7 @@ Update runner build dirs by explicit SHA (not `--remote`, which may resolve the 
 ssh ci@<ci-runner-ip> "
 for dir in \
   ~/<runner-agent>/_work/roomboard-linux/builds/<build-dir-hw2>/meta-custom-repo-arm \
-  ~/><runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/meta-custom-repo-arm; do
+  ~/<runner-agent-2>/_work/roomboard-linux/builds/<build-dir-hw2>/meta-custom-repo-arm; do
   git -C \"\$dir\" fetch origin
   git -C \"\$dir\" checkout <SHA>
   git -C \"\$dir\" log --oneline -1
