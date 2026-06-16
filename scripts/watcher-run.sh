@@ -494,6 +494,11 @@ _on_interrupt() {
       "$CURRENT_ISSUE" \
       "$_PRE_SESSION_ISSUE_REPO" \
       "$_PRE_SESSION_ISSUE_STAGE"
+    # Release watcher-lock so the issue isn't permanently stuck.
+    [[ -n "$CURRENT_ISSUE" && -n "$_PRE_SESSION_ISSUE_REPO" ]] && \
+      GH_HOST="$GH_HOST" gh issue edit "$CURRENT_ISSUE" \
+        --repo "$_PRE_SESSION_ISSUE_REPO" \
+        --remove-label "watcher-lock" 2>/dev/null || true
   fi
   # Flush current attempt counts to state file so retry caps survive the restart.
   if _state_write "" 2>/dev/null; then
@@ -611,7 +616,8 @@ _query_board() {
   raw=$(GH_HOST="$GH_HOST" gh api graphql -f query="
   { ${_matched_entity}(login:\"$ORG\") { projectV2(number:$PROJECT_NUM) { items(first:100) {
     nodes {
-      content { ... on Issue { number title state repository { nameWithOwner } } }
+      content { ... on Issue { number title state repository { nameWithOwner }
+                               labels(first:10) { nodes { name } } } }
       fieldValues(first:10) { nodes {
         ... on ProjectV2ItemFieldSingleSelectValue {
           name field { ... on ProjectV2SingleSelectField { name } }
@@ -622,8 +628,10 @@ _query_board() {
 
   # Build priority map from STAGE_ORDER (rightmost = highest priority = lowest sort key)
   # Then emit: <priority> <number> <repo> <stage>  sorted ascending, strip priority column
+  # Issues carrying 'watcher-lock' are skipped — another container is processing them.
   echo "$raw" | jq -r "[.data.${_matched_entity}.projectV2.items.nodes[]
     | select(.content.state==\"OPEN\")
+    | select((.content.labels.nodes // []) | map(.name) | index(\"watcher-lock\") | not)
     | { number: .content.number, title: .content.title,
         repo: .content.repository.nameWithOwner,
         stage: (.fieldValues.nodes[] | select(.field.name==\"Status\") | .name) }
@@ -890,7 +898,12 @@ print('yes' if 'human-only' in names else 'no')
   fi
   unset _sub_count
 
-  # All pre-flight checks passed — now announce the session.
+  # All pre-flight checks passed — claim the issue with watcher-lock label so
+  # parallel containers on the same board don't start a competing session.
+  GH_HOST="$GH_HOST" gh issue edit "$ISSUE_NUM" --repo "$ISSUE_REPO" \
+    --add-label "watcher-lock" 2>/dev/null || true
+
+  # Now announce the session.
   echo "Starting session for issue #$ISSUE_NUM  [$ISSUE_STAGE]  ($ISSUE_REPO)  ($(date))"
   echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
@@ -983,7 +996,9 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
   # Then we run cost attribution regardless of exit status.
   _finalize_session "$_PRE_SESSION_SNAPSHOT" "$ISSUE_NUM" "$ISSUE_REPO" "$ISSUE_STAGE"
 
-  # Post-session stage check: if the issue is still in the same stage it started
+  # Release the watcher-lock so the issue is visible to other containers again.
+  GH_HOST="$GH_HOST" gh issue edit "$ISSUE_NUM" --repo "$ISSUE_REPO" \
+    --remove-label "watcher-lock" 2>/dev/null || true if the issue is still in the same stage it started
   # in, the agent likely failed silently (zero exit but no real work done). Log a
   # clear warning so the human can diagnose without waiting for the retry cap.
   if [[ $ISSUE_EXIT -eq 0 ]]; then

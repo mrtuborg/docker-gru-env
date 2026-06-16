@@ -1,0 +1,35 @@
+# docker-compose.yml — example: two containers on the same host, different repos/boards.
+#
+# Rules for running multiple containers safely:
+#   1. WORKSPACE_REPO must point to DIFFERENT repos (or different project boards).
+#      Two containers on the same board will race — watcher-lock label prevents
+#      duplicate sessions, but it's cleaner to assign one container per board.
+#   2. Each container needs its OWN host paths for logs and copilot data.
+#      Sharing /logs or /data/copilot between containers corrupts cost-log.jsonl.
+#   3. GH_TOKEN may be shared across containers for the same GH_HOST.
+
+services:
+
+  # Container A — repo 1
+  gru-repo-a:
+    image: docker-gru-env:latest
+    environment:
+      GH_TOKEN: "${GH_TOKEN_A}"          # token for GH_HOST_A
+      GH_HOST: "${GH_HOST_A:-github.com}"
+      WORKSPACE_REPO: "${WORKSPACE_REPO_A}"
+    volumes:
+      - ./logs/repo-a:/logs              # separate log dir per container
+      - ./data/repo-a:/data/copilot      # separate cost-log.jsonl per container
+    restart: unless-stopped
+
+  # Container B — repo 2
+  gru-repo-b:
+    image: docker-gru-env:latest
+    environment:
+      GH_TOKEN: "${GH_TOKEN_B}"
+      GH_HOST: "${GH_HOST_B:-github.com}"
+      WORKSPACE_REPO: "${WORKSPACE_REPO_B}"
+    volumes:
+      - ./logs/repo-b:/logs
+      - ./data/repo-b:/data/copilot
+    restart: unless-stopped
