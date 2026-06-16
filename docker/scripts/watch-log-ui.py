@@ -225,7 +225,10 @@ class LogBuffer:
             return None
 
     def _backfill_from_logs(self, container):
-        """Parse /logs/run-*.log inside the container to hydrate _done with history."""
+        """Parse /logs/run-*.log inside the container to hydrate _active with any
+        in-progress issue. Completed issues are NOT backfilled into _done — the
+        dashboard section is titled "Completed This Run" and must only show
+        completions from the current watcher session."""
         try:
             result = subprocess.run(
                 ['docker', 'exec', container, 'sh', '-c',
@@ -237,7 +240,6 @@ class LogBuffer:
             return
 
         pending = {}   # num -> {stage, started_epoch}
-        done_seen = set()  # (num, stage) to deduplicate across log files
 
         for log_file in log_files:
             if not log_file:
@@ -255,23 +257,23 @@ class LogBuffer:
                         pending[num] = {'stage': stage, 'started_epoch': epoch}
                     md = self.ISSUE_DONE.search(line)
                     if md:
-                        num, status = int(md.group(1)), md.group(2)
-                        epoch = self._parse_log_ts(line)
-                        p = pending.pop(num, {})
-                        stage = p.get('stage', '')
-                        key = (num, stage)
-                        if key in done_seen:
-                            continue
-                        done_seen.add(key)
-                        entry = {'num': num, 'status': status, 'stage': stage}
-                        if p.get('started_epoch') and epoch:
-                            entry['duration_s'] = max(0, int(epoch - p['started_epoch']))
-                        self._done.append(entry)
+                        num = int(md.group(1))
+                        pending.pop(num, None)
             except Exception:
                 continue
 
-        # Keep only last 50; in-memory live sessions append after this
-        self._done = self._done[-50:]
+        # Restore _active for any issue that started but never completed
+        # (e.g. dashboard restarted mid-run)
+        if pending:
+            num, info = next(reversed(pending.items()))
+            with self._lock:
+                if self._active is None:
+                    self._active = {
+                        'num': num,
+                        'stage': info.get('stage', ''),
+                        'started': '',
+                        'started_epoch': info.get('started_epoch', time.time()),
+                    }
 
     def _stream(self):
         while True:
@@ -1034,9 +1036,10 @@ function toggleLog() {
 </script>
 <script>
 // ── Shared state ─────────────────────────────────────────────────────────────
-let boardItems = [];
-let stageOrder = [];
-let projName   = '';
+let boardItems  = [];
+let boardLoaded = false;   // true after first successful /api/board response
+let stageOrder  = [];
+let projName    = '';
 let activeIssue = null;   // {num, stage, started}
 let doneIssues  = [];
 let elapsedTimer = null;
@@ -1190,11 +1193,13 @@ function renderPipeline() {
 
 // ── Render: Completed ─────────────────────────────────────────────────────────
 function renderCompleted() {
-  // Only show issues that belong to the current project board
+  // Only show issues that belong to the current project board.
+  // If the board hasn't loaded yet, hide the section rather than showing
+  // unfiltered history (avoids a flash of cross-board issues on startup).
   const boardNums = new Set(boardItems.map(i => i.number));
-  const filtered  = boardNums.size > 0
+  const filtered  = boardLoaded
     ? doneIssues.filter(it => boardNums.has(it.num))
-    : doneIssues;
+    : [];
 
   if (!filtered.length) {
     document.getElementById('done-section').classList.add('hidden');
@@ -1225,7 +1230,8 @@ async function refreshBoard() {
   try {
     const d = await fetch('/api/board').then(r => r.json());
     if (d.error) { console.warn('Board:', d.error); return; }
-    boardItems = d.items || [];
+    boardItems  = d.items || [];
+    boardLoaded = true;
     stageOrder = d.stage_order || [];
     projName   = d.project_name || 'Watcher Board';
     document.getElementById('project-name').textContent = projName;
