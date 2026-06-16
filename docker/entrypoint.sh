@@ -7,7 +7,13 @@ set -euo pipefail
 : "${GH_HOST:=github.com}"
 
 echo "[entrypoint] Authenticating gh CLI..."
-echo "$GH_TOKEN" | gh auth login --hostname "$GH_HOST" --with-token
+# gh 2.67+ exits with code 1 if you run `gh auth login` while GH_TOKEN is already
+# set in the environment (it uses the env var automatically).  Skip explicit login.
+if gh auth status --hostname "$GH_HOST" >/dev/null 2>&1; then
+  echo "[entrypoint] GH_TOKEN already active for $GH_HOST"
+else
+  echo "$GH_TOKEN" | gh auth login --hostname "$GH_HOST" --with-token
+fi
 
 echo "[entrypoint] Copilot CLI: $(copilot --version 2>/dev/null || echo 'not found')"
 
