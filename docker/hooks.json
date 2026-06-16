@@ -1,0 +1,6 @@
+{
+  "sessionEnd": {
+    "run": "python3 /tools/gru/src/cost-sync.py",
+    "description": "Append cost record for closed session to $COPILOT_DATA_HOME/cost-log.jsonl"
+  }
+}

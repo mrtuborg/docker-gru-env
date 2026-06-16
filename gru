@@ -1,0 +1,62 @@
+#!/bin/bash
+#
+# gru — Gru's Lab: copilot-workflow Environment Setup (Modular Plugin System)
+#
+# Sets up a containerized environment for running Copilot workflow tooling
+# (overnight autopilot, cost reporting, dashboards) using Docker, with a
+# modular plugin-based architecture. Layout mirrors docker-yocto-env:
+# this entry point + core/ + plugins/ + lib/ live at the repo root.
+#
+# USAGE:
+#   source ./gru            # build/pull image if needed, register commands
+#   source ./gru --rebuild  # force a rebuild of the image
+#
+
+# Prevent direct execution.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    echo "This script should be sourced, not executed."
+    echo "Use: source ${BASH_SOURCE[0]}"
+    exit 1
+fi
+
+thisFile="${BASH_SOURCE[0]}"
+
+# Zsh support.
+[ -z "${thisFile}" ] && thisFile="${(%):-%x}"
+# Unsupported shell.
+[ -z "${thisFile}" ] && echo "Shell is unsupported" && return 1
+
+SCRIPT_DIR=$(dirname "$(realpath "${thisFile}")")
+export SCRIPT_DIR
+
+# Welcome banner.
+echo "============================================"
+echo "          Welcome to the Gru's Lab"
+echo "============================================"
+
+# Allow `source ./env --rebuild` to force an image rebuild.
+FORCE_BUILD="${FORCE_BUILD:-false}"
+if [[ "${1:-}" == "--rebuild" ]]; then
+    FORCE_BUILD=true
+fi
+export FORCE_BUILD
+
+# Load core system.
+if ! source "${SCRIPT_DIR}/core/env_core.sh"; then
+    echo "ERROR: Failed to load core environment" >&2
+    return 1
+fi
+
+# Initialize environment.
+if ! _initialize_environment; then
+    echo "ERROR: Failed to initialize environment" >&2
+    return 1
+fi
+
+echo
+echo "This environment has the following functions:"
+echo "============================================"
+
+show_plugin_commands
+
+echo

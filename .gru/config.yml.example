@@ -1,0 +1,35 @@
+gh_host: github.com
+data_repo: vladimir-nosenko/copilot-workflow
+pages_repo: vladimir-nosenko/vladimir-nosenko.github.com
+
+pages:
+  branch: main
+
+project:
+  owner: custom-repo
+  number: 8
+
+# Maps session repository names to the canonical repo that holds the project issues.
+# Used by cost-board-sync (to match board items) and cost-link (for API lookups).
+repo_aliases:
+  "vladimir-nosenko/custom-repo-linux": "custom-repo/custom-repo-linux"
+  "custom-repo/roomboard-distro-test": "custom-repo/roomboard-linux"
+  "mrtuborg/copilot-sessions-keeper": "vladimir-nosenko/copilot-workflow"
+  "vladimir-nosenko/copilot-session-cost": "vladimir-nosenko/copilot-workflow"
+  "mrtuborg/copilot-wiki-extractor": "vladimir-nosenko/copilot-workflow"
+  "custom-repo/Custom-repo/imx_custom-repo_serial_loader": "custom-repo/custom-repo-linux"
+
+# Maps a repository to a project number for sessions that have no issue refs,
+# or whose issue refs don't match any project board issue.
+# Sessions from that repo are attributed to that project as "#-1 (no issue)".
+# Sessions with issue refs that DO match a board still go to the correct project.
+repo_projects:
+  "vladimir-nosenko/platform-workspace": 13
+  "mrtuborg/daily-dev-tracker": 8
+  "mrtuborg/copilot-sessions-keeper": 8
+  "custom-repo/custom-repo-linux": 3
+  "custom-repo/roomboard-linux": 7
+  "custom-repo/meta-mender-custom-repo": 12
+  "vladimir-nosenko/copilot-workflow": 8
+  "vladimir-nosenko/custom-repo-copilot-tracker": 8
+

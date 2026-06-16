@@ -1,0 +1,183 @@
+# GitHub Copilot CLI per-million-token pricing.
+#
+# Source: https://docs.github.com/en/copilot/reference/copilot-billing/models-and-pricing
+# Fetched: 2026-05-21
+# Effective: 2026-06-01 (usage-based billing)
+#
+# All prices are USD per 1,000,000 tokens.
+# 1 AI credit = $0.01 USD.
+#
+# Anthropic models include a separate `cache_write` price (1.25x input).
+# OpenAI / Google / xAI models have only `cached_input` (no separate write).
+# Token attribute mapping (from the OTel exporter):
+#   gen_ai.usage.input_tokens                    -> input + cache_read + cache_creation (Anthropic)
+#                                                   or input + cache_read (OpenAI)
+#   gen_ai.usage.output_tokens                   -> output (includes reasoning for OpenAI)
+#   gen_ai.usage.cache_read.input_tokens         -> cache_read (subtract from input_tokens)
+#   gen_ai.usage.cache_creation.input_tokens     -> cache_creation (Anthropic only; subtract too)
+#   gen_ai.usage.reasoning.output_tokens         -> reasoning (subset of output_tokens; for reporting only)
+
+schema_version: 1
+fetched_at: 2026-05-21
+
+models:
+  claude-haiku-4.5:
+    vendor: anthropic
+    input: 1
+    cached_input: 0.1
+    output: 5
+    cache_write: 1.25
+    category: versatile
+
+  claude-opus-4.5:
+    vendor: anthropic
+    input: 5
+    cached_input: 0.5
+    output: 25
+    cache_write: 6.25
+    category: powerful
+
+  claude-opus-4.6:
+    vendor: anthropic
+    input: 5
+    cached_input: 0.5
+    output: 25
+    cache_write: 6.25
+    category: powerful
+
+  claude-opus-4.7:
+    vendor: anthropic
+    input: 5
+    cached_input: 0.5
+    output: 25
+    cache_write: 6.25
+    category: powerful
+
+  claude-sonnet-4:
+    vendor: anthropic
+    input: 3
+    cached_input: 0.3
+    output: 15
+    cache_write: 3.75
+    category: versatile
+
+  claude-sonnet-4.5:
+    vendor: anthropic
+    input: 3
+    cached_input: 0.3
+    output: 15
+    cache_write: 3.75
+    category: versatile
+
+  claude-sonnet-4.6:
+    vendor: anthropic
+    input: 3
+    cached_input: 0.3
+    output: 15
+    cache_write: 3.75
+    category: versatile
+
+  gemini-2.5-pro:
+    vendor: google
+    input: 1.25
+    cached_input: 0.125
+    output: 10
+    category: powerful
+
+  gemini-3-flash:
+    vendor: google
+    input: 0.5
+    cached_input: 0.05
+    output: 3
+    category: lightweight
+
+  gemini-3.1-pro:
+    vendor: google
+    input: 2
+    cached_input: 0.2
+    output: 12
+    category: powerful
+
+  gemini-3.5-flash:
+    vendor: google
+    input: 1.5
+    cached_input: 0.15
+    output: 9
+    category: lightweight
+
+  goldeneye:
+    vendor: github
+    input: 1.25
+    cached_input: 0.125
+    output: 10
+    category: powerful
+
+  gpt-4.1:
+    vendor: openai
+    input: 2
+    cached_input: 0.5
+    output: 8
+    category: versatile
+
+  gpt-5-mini:
+    vendor: openai
+    input: 0.25
+    cached_input: 0.025
+    output: 2
+    category: lightweight
+
+  gpt-5.2:
+    vendor: openai
+    input: 1.75
+    cached_input: 0.175
+    output: 14
+    category: versatile
+
+  gpt-5.2-codex:
+    vendor: openai
+    input: 1.75
+    cached_input: 0.175
+    output: 14
+    category: powerful
+
+  gpt-5.3-codex:
+    vendor: openai
+    input: 1.75
+    cached_input: 0.175
+    output: 14
+    category: powerful
+
+  gpt-5.4:
+    vendor: openai
+    input: 2.5
+    cached_input: 0.25
+    output: 15
+    category: versatile
+
+  gpt-5.4-mini:
+    vendor: openai
+    input: 0.75
+    cached_input: 0.075
+    output: 4.5
+    category: lightweight
+
+  gpt-5.4-nano:
+    vendor: openai
+    input: 0.2
+    cached_input: 0.02
+    output: 1.25
+    category: lightweight
+
+  gpt-5.5:
+    vendor: openai
+    input: 5
+    cached_input: 0.5
+    output: 30
+    category: powerful
+
+  raptor-mini:
+    vendor: github
+    input: 0.25
+    cached_input: 0.025
+    output: 2
+    category: versatile

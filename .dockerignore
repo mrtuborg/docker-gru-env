@@ -1,0 +1,27 @@
+# Build context exclusions for docker/Dockerfile (COPY . /tools/gru).
+# Keep the runtime tooling (gru, core/, plugins/, lib/, src/, scripts/, docker/,
+# prompts/, skills/, requirements.txt, .gru/) but drop everything
+# that is not needed inside the image.
+
+.git
+.gitignore
+.github
+.pytest_cache
+__pycache__
+**/__pycache__
+*.pyc
+*.pyo
+.DS_Store
+
+# Generated dashboard output (regenerated at runtime, never needed in the image).
+docs
+*.html
+
+# Cost data is provided at runtime via the named data volume (seeded from the
+# host data/ bind-mount), so it must not be baked into the image layer.
+data
+
+# SQLite sidecars and local notes.
+*.db-shm
+*.db-wal
+lessons-learned.md

@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+docs/
+lessons-learned.md
+# Generated dashboard HTML (output of cost-report.py)
+*.html
+
+# SQLite WAL/SHM sidecar files (the .db itself is tracked)
+*.db-shm
+*.db-wal
+
+# Personal configuration — never commit
+.gru/config.yml
+.gru/manual-attributions.yml
+
+# macOS metadata
+.DS_Store
+**/.DS_Store
