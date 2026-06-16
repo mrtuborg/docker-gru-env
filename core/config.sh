@@ -8,6 +8,9 @@ CW_IMAGE="${CW_IMAGE:-gru:local}"
 # Named Docker volumes (persist Copilot data + logs across runs).
 CW_DATA_VOLUME="${CW_DATA_VOLUME:-gru-data}"
 CW_LOGS_VOLUME="${CW_LOGS_VOLUME:-gru-logs}"
+# Stores the merged copilot-instructions.md for background watcher containers.
+# Using a named volume (not /tmp) ensures the file survives terminal close.
+CW_INSTRUCT_VOLUME="${CW_INSTRUCT_VOLUME:-gru-instructions}"
 
 # Repository root (build context + bind-mount source).
 #
@@ -65,6 +68,7 @@ fi
 export CW_IMAGE
 export CW_DATA_VOLUME
 export CW_LOGS_VOLUME
+export CW_INSTRUCT_VOLUME
 export PROJECT_TOP
 export CW_DOCKERFILE
 export GH_HOST

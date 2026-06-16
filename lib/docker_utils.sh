@@ -73,7 +73,7 @@ _ensure_cw_image() {
 # Create the named Docker volumes if they do not already exist.
 _ensure_cw_volumes() {
     local vol
-    for vol in "${CW_DATA_VOLUME}" "${CW_LOGS_VOLUME}"; do
+    for vol in "${CW_DATA_VOLUME}" "${CW_LOGS_VOLUME}" "${CW_INSTRUCT_VOLUME}"; do
         if ! docker volume inspect "${vol}" >/dev/null 2>&1; then
             echo "Creating volume: ${vol}"
             docker volume create "${vol}" >/dev/null || {
@@ -172,6 +172,7 @@ _run_cw_docker() {
         -v "${CW_SSH_PATH}:/root/.ssh:ro" \
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
+        -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
         "${extra_flags[@]}" \
         -e GH_TOKEN \
         -e GH_HOST \
@@ -241,6 +242,7 @@ _cw_dock_bg() {
         -v "${CW_SSH_PATH}:/root/.ssh:ro" \
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
+        -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
         "${extra_flags[@]}" \
         -e GH_TOKEN \
         -e GH_HOST \

@@ -29,13 +29,16 @@ _ghwatch_container_name() {
     echo "gru-watcher-${base}"
 }
 
-# Build a merged copilot-instructions.md on the host and mount it read-only
-# inside the container at /workspace/.github/copilot-instructions.md.
-# This makes Path 1 (gh-watch bind-mount) identical to Path 2 (entrypoint
-# fresh-clone), without touching the host workspace file.
+# Write the merged copilot-instructions.md into the gru-instructions named volume
+# so it persists after the terminal is closed. A /tmp bind-mount would be deleted
+# when the shell exits, breaking the running container.
 #
-# Sets _GHWATCH_MERGED_INSTR_FILE and appends the mount to CW_EXTRA_DOCKER_FLAGS.
-# Caller must restore _saved_extra_docker after the docker call.
+# The file lives at /data/instructions/<safe-name>/copilot-instructions.md inside
+# the volume (mounted at /data/instructions by _cw_dock_bg). At container startup
+# CW_INSTRUCT_BOOTSTRAP (core/common.sh) copies it to
+# /workspace/.github/copilot-instructions.md.
+#
+# Sets CW_INSTRUCT_VOL_PATH and appends -e CW_INSTRUCT_VOL_PATH to CW_EXTRA_DOCKER_FLAGS.
 _ghwatch_merge_instructions() {
     local _ws="$1"
     local _defaults="${SCRIPT_DIR}/docker/defaults/copilot-instructions.md"
@@ -45,8 +48,9 @@ _ghwatch_merge_instructions() {
         echo "[gh-watch] WARNING: defaults not found at ${_defaults} — container instructions will be workspace-only" >&2
     fi
 
-    local _merged
-    _merged=$(mktemp /tmp/gru-merged-instructions.XXXXXX)
+    # Build merged content in a temp file first, then copy into the volume.
+    local _tmp
+    _tmp=$(mktemp /tmp/gru-merged-instructions.XXXXXX)
 
     if [[ -f "$_workspace_instr" && -f "$_defaults" ]]; then
         {
@@ -55,22 +59,38 @@ _ghwatch_merge_instructions() {
             printf '<!-- CONTAINER DEFAULTS — lower priority than workspace rules above.\n'
             printf '     If any rule here conflicts with a workspace rule above, the WORKSPACE RULE wins. -->\n\n'
             cat "$_defaults"
-        } > "$_merged"
+        } > "$_tmp"
     elif [[ -f "$_workspace_instr" ]]; then
-        cp "$_workspace_instr" "$_merged"
+        cp "$_workspace_instr" "$_tmp"
     elif [[ -f "$_defaults" ]]; then
-        cp "$_defaults" "$_merged"
+        cp "$_defaults" "$_tmp"
     else
-        rm -f "$_merged"
+        rm -f "$_tmp"
         return 0  # nothing to mount
     fi
 
-    # Ensure the parent dir exists inside the workspace so Docker can bind-mount
-    # a file on top of it. Safe: .github/ is never an empty tracked git dir.
-    mkdir -p "${_ws}/.github"
+    # Derive a stable key from the workspace path so concurrent watchers don't
+    # overwrite each other's file in the shared volume.
+    local _safe_name
+    _safe_name=$(basename "${_ws}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-*$//')
+    local _vol_path="/data/instructions/${_safe_name}/copilot-instructions.md"
 
-    _GHWATCH_MERGED_INSTR_FILE="$_merged"
-    CW_EXTRA_DOCKER_FLAGS="${CW_EXTRA_DOCKER_FLAGS:-} -v ${_merged}:/workspace/.github/copilot-instructions.md:ro"
+    # Copy the merged file into the named volume via a one-shot container.
+    docker run --rm \
+        -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
+        -v "${_tmp}:/src/copilot-instructions.md:ro" \
+        alpine:latest sh -c "
+            mkdir -p /data/instructions/${_safe_name}
+            cp /src/copilot-instructions.md ${_vol_path}
+        " >/dev/null && echo "[gh-watch] Merged instructions written to volume (${_vol_path})" || \
+        echo "[gh-watch] WARNING: failed to write instructions to volume — skipping" >&2
+
+    rm -f "$_tmp"
+
+    # Pass the volume-internal path to the container — CW_INSTRUCT_BOOTSTRAP reads it.
+    # The volume itself is already mounted at /data/instructions by _cw_dock_bg.
+    export CW_INSTRUCT_VOL_PATH="${_vol_path}"
+    CW_EXTRA_DOCKER_FLAGS="${CW_EXTRA_DOCKER_FLAGS:-} -e CW_INSTRUCT_VOL_PATH"
     export CW_EXTRA_DOCKER_FLAGS
 }
 
@@ -124,7 +144,6 @@ gh-watch() {
     # pollute the shell session after this call returns.
     local _saved_config_flag="${CW_CONFIG_FLAG}"
     local _saved_extra_docker="${CW_EXTRA_DOCKER_FLAGS:-}"
-    local _GHWATCH_MERGED_INSTR_FILE=""
 
     # Helper: validate dir and set CW_CONFIG_FLAG for this invocation only.
     # Caller must restore _saved_config_flag on all exit paths.
@@ -152,7 +171,6 @@ gh-watch() {
             local _rc=$?
             CW_CONFIG_FLAG="${_saved_config_flag}"
             CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
-            [[ -n "$_GHWATCH_MERGED_INSTR_FILE" ]] && rm -f "$_GHWATCH_MERGED_INSTR_FILE"
             return $_rc
             ;;
 
@@ -178,7 +196,6 @@ gh-watch() {
                 echo "⚠️  Watcher already running (${cname})" >&2
                 CW_CONFIG_FLAG="${_saved_config_flag}"
                 CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
-                [[ -n "$_GHWATCH_MERGED_INSTR_FILE" ]] && rm -f "$_GHWATCH_MERGED_INSTR_FILE"
                 return 1
             fi
             docker rm -f "${cname}" 2>/dev/null || true
@@ -190,8 +207,6 @@ gh-watch() {
             _cw_dock_bg "${cmd}" "${ws}" "${cname}"
             CW_CONFIG_FLAG="${_saved_config_flag}"
             CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
-            # Note: merged file kept alive — container reads it after start.
-            # It will be cleaned up on next gh-watch invocation or shell exit.
             echo "✅ Watcher started"
             local host_config=""
             [ -n "${dir_config_flag}" ] && host_config="${ws}/${dir_config_flag}/config.yml"
@@ -212,8 +227,6 @@ gh-watch() {
                 stopped=1
             fi
             _logui_stop "${cname}"
-            # Clean up any merged-instructions temp file left by a previous start.
-            rm -f /tmp/gru-merged-instructions.* 2>/dev/null || true
             [ $stopped -eq 0 ] && echo "⚠️  Watcher not running (${cname})"
             ;;
 
