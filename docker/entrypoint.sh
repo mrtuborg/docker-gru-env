@@ -31,15 +31,18 @@ if [[ -n "${LINKED_REPOS:-}" ]]; then
   done
 fi
 
-# Install default copilot-instructions.md if the workspace repo doesn't provide one.
-# Sessions run from /workspace, so gh copilot picks up .github/copilot-instructions.md
-# from there automatically. The consumer file always takes precedence.
+# Always append the built-in defaults to whatever instructions the workspace provides
+# (or use them alone if the workspace has none). This ensures container-specific
+# rules (non-interactive mode, automation constraints) are always present alongside
+# the project-specific rules.
+mkdir -p /workspace/.github
 if [[ ! -f /workspace/.github/copilot-instructions.md ]]; then
-  mkdir -p /workspace/.github
   cp /tools/gru/docker/defaults/copilot-instructions.md /workspace/.github/copilot-instructions.md
-  echo "[entrypoint] Using built-in default copilot-instructions.md (workspace repo has none)"
+  echo "[entrypoint] No workspace copilot-instructions.md — using built-in defaults"
 else
-  echo "[entrypoint] Using workspace copilot-instructions.md"
+  { echo ""; cat /tools/gru/docker/defaults/copilot-instructions.md; } \
+    >> /workspace/.github/copilot-instructions.md
+  echo "[entrypoint] Appended built-in defaults to workspace copilot-instructions.md"
 fi
 
 # Copy project extensions into the Copilot data dir so the CLI finds them.
