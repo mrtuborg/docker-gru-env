@@ -38,10 +38,11 @@ CW_AUTH_BOOTSTRAP='if [ -n "${GH_TOKEN:-}" ]; then export GITHUB_TOKEN="${GITHUB
 
 # Shell snippet that installs skills inside the container:
 #   1. Built-in skills from docker-gru-env (/tools/gru/skills/) — always present.
-#   2. Workspace skills from /workspace/skills/ — loaded after, so they override built-ins.
+#   2. Workspace skills from /workspace/skills/ — each skill dir replaces (not
+#      merges with) the same-named built-in, so workspace skills truly override.
 # Mirrors the two-step logic in entrypoint.sh so Path 1 (gh-watch bind-mount)
 # and Path 2 (entrypoint fresh-clone) install skills identically.
-CW_SKILLS_BOOTSTRAP='/tools/gru/install-skills.sh 2>/dev/null || true; if [ -d /workspace/skills ]; then _sd="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"; mkdir -p "$_sd"; cp -r /workspace/skills/. "$_sd/"; fi'
+CW_SKILLS_BOOTSTRAP='/tools/gru/install-skills.sh 2>/dev/null || true; if [ -d /workspace/skills ]; then _sd="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"; mkdir -p "$_sd"; for _sk in /workspace/skills/*/; do [ -d "$_sk" ] && rm -rf "$_sd/$(basename "$_sk")" && cp -r "$_sk" "$_sd/"; done; fi'
 
 # The standalone copilot CLI is baked into the image, so the Copilot bootstrap is
 # just authentication (kept as a separate name for the copilot/watcher plugins).

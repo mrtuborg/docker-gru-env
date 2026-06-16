@@ -69,11 +69,15 @@ if [[ -d /tools/gru/skills ]]; then
   echo "[entrypoint] Built-in skills installed: $(ls /tools/gru/skills | tr '\n' ' ')"
 fi
 
-# Install workspace skills from /workspace/skills/ — loaded after built-ins so that
-# a consumer skill with the same name overrides the built-in version.
+# Install workspace skills from /workspace/skills/ — each skill dir replaces
+# (not merges with) the same-named built-in, so workspace skills truly override.
 if [[ -d /workspace/skills ]]; then
   mkdir -p "$_skills_dest"
-  cp -r /workspace/skills/. "$_skills_dest/"
+  for _sk in /workspace/skills/*/; do
+    [[ -d "$_sk" ]] || continue
+    rm -rf "$_skills_dest/$(basename "$_sk")"
+    cp -r "$_sk" "$_skills_dest/"
+  done
   echo "[entrypoint] Workspace skills installed: $(ls /workspace/skills | tr '\n' ' ')"
 fi
 

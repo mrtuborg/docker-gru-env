@@ -42,13 +42,13 @@ _ghwatch_merge_instructions() {
     local _workspace_instr="${_ws}/.github/copilot-instructions.md"
 
     if [[ ! -f "$_defaults" ]]; then
-        return 0  # no defaults to append
+        echo "[gh-watch] WARNING: defaults not found at ${_defaults} — container instructions will be workspace-only" >&2
     fi
 
     local _merged
     _merged=$(mktemp /tmp/gru-merged-instructions.XXXXXX)
 
-    if [[ -f "$_workspace_instr" ]]; then
+    if [[ -f "$_workspace_instr" && -f "$_defaults" ]]; then
         {
             cat "$_workspace_instr"
             printf '\n---\n'
@@ -56,9 +56,18 @@ _ghwatch_merge_instructions() {
             printf '     If any rule here conflicts with a workspace rule above, the WORKSPACE RULE wins. -->\n\n'
             cat "$_defaults"
         } > "$_merged"
-    else
+    elif [[ -f "$_workspace_instr" ]]; then
+        cp "$_workspace_instr" "$_merged"
+    elif [[ -f "$_defaults" ]]; then
         cp "$_defaults" "$_merged"
+    else
+        rm -f "$_merged"
+        return 0  # nothing to mount
     fi
+
+    # Ensure the parent dir exists inside the workspace so Docker can bind-mount
+    # a file on top of it. Safe: .github/ is never an empty tracked git dir.
+    mkdir -p "${_ws}/.github"
 
     _GHWATCH_MERGED_INSTR_FILE="$_merged"
     CW_EXTRA_DOCKER_FLAGS="${CW_EXTRA_DOCKER_FLAGS:-} -v ${_merged}:/workspace/.github/copilot-instructions.md:ro"
@@ -203,6 +212,8 @@ gh-watch() {
                 stopped=1
             fi
             _logui_stop "${cname}"
+            # Clean up any merged-instructions temp file left by a previous start.
+            rm -f /tmp/gru-merged-instructions.* 2>/dev/null || true
             [ $stopped -eq 0 ] && echo "⚠️  Watcher not running (${cname})"
             ;;
 
