@@ -102,6 +102,17 @@ def _validate_values(data: dict) -> None:
     except KeyError:
         pass  # already caught as missing required key
 
+    try:
+        allowed = _get_nested(data, "allowed_repos")
+        if not isinstance(allowed, list) or not allowed:
+            errors.append("allowed_repos must be a non-empty list of 'owner/repo' strings")
+        else:
+            for entry in allowed:
+                if not isinstance(entry, str) or not _OWNER_REPO_RE.match(entry):
+                    errors.append(f"allowed_repos entry must be in 'owner/repo' format, got: {entry!r}")
+    except KeyError:
+        pass  # optional — defaults to [data_repo] at runtime
+
     for key in ("prompt_template", "watcher.prompts_dir", "working_dir"):
         try:
             val = _get_nested(data, key)

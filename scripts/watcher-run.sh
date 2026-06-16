@@ -169,10 +169,28 @@ except Exception:
   _pi=$(_cfg_optional watcher.poll_interval)
   [[ -n "$_pi" && "$_pi" =~ ^[0-9]+$ && -z "$_CLI_POLL_INTERVAL" ]] && POLL_INTERVAL="$_pi"
   unset _pi
+  # Load allowed_repos as space-separated string; default to data_repo if not set.
+  _allowed_repos_raw=$(_cfg_optional allowed_repos)
+  if [[ -n "$_allowed_repos_raw" ]]; then
+    ALLOWED_REPOS=$(echo "$_allowed_repos_raw" | python3 -c "
+import sys, ast
+v = sys.stdin.read().strip()
+try:
+    lst = ast.literal_eval(v)
+    print(' '.join(str(x) for x in lst))
+except Exception:
+    print(v)
+")
+  fi
+  unset _allowed_repos_raw
 fi
 
 # Default STAGE_ORDER if not set from config (built-in: Todo, In progress)
 STAGE_ORDER="${STAGE_ORDER:-Todo|In progress}"
+# ALLOWED_REPOS: space-separated list of owner/repo pairs whose issues this board may process.
+# Always includes REPO (data_repo) regardless of config — union at runtime.
+ALLOWED_REPOS="${ALLOWED_REPOS:-}"
+[[ "$ALLOWED_REPOS" != *"$REPO"* ]] && ALLOWED_REPOS="${REPO}${ALLOWED_REPOS:+ $ALLOWED_REPOS}"
 
 # Built-in stage handlers live here; consumer dir overlays on top.
 BUILTIN_STAGES_DIR="$(dirname "$SCRIPT_DIR")/stage-prompts"
@@ -938,7 +956,8 @@ print('yes' if 'human-only' in names else 'no')
   PROMPT=$(ISSUE_NUM="$ISSUE_NUM" REPO="$ISSUE_REPO" ISSUE_REPO="$ISSUE_REPO" \
     GH_HOST="$GH_HOST" ISSUE_STAGE="$ISSUE_STAGE" \
     PROJECT_NUM="$PROJECT_NUM" PROJECT_ID="$PROJECT_ID" PROJECT_OWNER="$ORG" PROJECT_ENTITY="$PROJECT_ENTITY" \
-    envsubst '${ISSUE_NUM} ${REPO} ${ISSUE_REPO} ${GH_HOST} ${ISSUE_STAGE} ${PROJECT_NUM} ${PROJECT_ID} ${PROJECT_OWNER} ${PROJECT_ENTITY}' \
+    ALLOWED_REPOS="$ALLOWED_REPOS" \
+    envsubst '${ISSUE_NUM} ${REPO} ${ISSUE_REPO} ${GH_HOST} ${ISSUE_STAGE} ${PROJECT_NUM} ${PROJECT_ID} ${PROJECT_OWNER} ${PROJECT_ENTITY} ${ALLOWED_REPOS}' \
     < "$HANDLER")
 
   # Snapshot session-state dir and store issue context in globals so that
