@@ -40,9 +40,16 @@ if [[ ! -f /workspace/.github/copilot-instructions.md ]]; then
   cp /tools/gru/docker/defaults/copilot-instructions.md /workspace/.github/copilot-instructions.md
   echo "[entrypoint] No workspace copilot-instructions.md — using built-in defaults"
 else
-  { echo ""; cat /tools/gru/docker/defaults/copilot-instructions.md; } \
-    >> /workspace/.github/copilot-instructions.md
-  echo "[entrypoint] Appended built-in defaults to workspace copilot-instructions.md"
+  cat >> /workspace/.github/copilot-instructions.md << 'EOF'
+
+---
+<!-- CONTAINER DEFAULTS — lower priority than workspace rules above.
+     These rules apply inside the automated container session.
+     If any rule here conflicts with a workspace rule above, the WORKSPACE RULE wins. -->
+
+EOF
+  cat /tools/gru/docker/defaults/copilot-instructions.md >> /workspace/.github/copilot-instructions.md
+  echo "[entrypoint] Appended built-in defaults (lower priority) to workspace copilot-instructions.md"
 fi
 
 # Copy project extensions into the Copilot data dir so the CLI finds them.

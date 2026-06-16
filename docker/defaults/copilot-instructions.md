@@ -1,7 +1,8 @@
 # Copilot Instructions
 
-<!-- This is the built-in fallback. Override by placing .github/copilot-instructions.md
-     in your workspace repo. The container will prefer your file over this one. -->
+<!-- This is the built-in container default. When a workspace repo provides its own
+     .github/copilot-instructions.md, this file is appended AFTER it.
+     PRIORITY: workspace rules take precedence over any rule in this file. -->
 
 ## Operating mode
 
