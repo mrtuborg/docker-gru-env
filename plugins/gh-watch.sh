@@ -29,6 +29,42 @@ _ghwatch_container_name() {
     echo "gru-watcher-${base}"
 }
 
+# Build a merged copilot-instructions.md on the host and mount it read-only
+# inside the container at /workspace/.github/copilot-instructions.md.
+# This makes Path 1 (gh-watch bind-mount) identical to Path 2 (entrypoint
+# fresh-clone), without touching the host workspace file.
+#
+# Sets _GHWATCH_MERGED_INSTR_FILE and appends the mount to CW_EXTRA_DOCKER_FLAGS.
+# Caller must restore _saved_extra_docker after the docker call.
+_ghwatch_merge_instructions() {
+    local _ws="$1"
+    local _defaults="${SCRIPT_DIR}/docker/defaults/copilot-instructions.md"
+    local _workspace_instr="${_ws}/.github/copilot-instructions.md"
+
+    if [[ ! -f "$_defaults" ]]; then
+        return 0  # no defaults to append
+    fi
+
+    local _merged
+    _merged=$(mktemp /tmp/gru-merged-instructions.XXXXXX)
+
+    if [[ -f "$_workspace_instr" ]]; then
+        {
+            cat "$_workspace_instr"
+            printf '\n---\n'
+            printf '<!-- CONTAINER DEFAULTS — lower priority than workspace rules above.\n'
+            printf '     If any rule here conflicts with a workspace rule above, the WORKSPACE RULE wins. -->\n\n'
+            cat "$_defaults"
+        } > "$_merged"
+    else
+        cp "$_defaults" "$_merged"
+    fi
+
+    _GHWATCH_MERGED_INSTR_FILE="$_merged"
+    CW_EXTRA_DOCKER_FLAGS="${CW_EXTRA_DOCKER_FLAGS:-} -v ${_merged}:/workspace/.github/copilot-instructions.md:ro"
+    export CW_EXTRA_DOCKER_FLAGS
+}
+
 # Parse common flags shared by run/start.
 # Sets: ws, board_flag, extra (quoted remaining args).
 # Consumes from positional args passed in.
@@ -75,9 +111,11 @@ gh-watch() {
             ;;
     esac
 
-    # Save the current config flag so a DIR override doesn't pollute the shell
-    # session after this call returns.
+    # Save the current config flag and extra docker flags so overrides don't
+    # pollute the shell session after this call returns.
     local _saved_config_flag="${CW_CONFIG_FLAG}"
+    local _saved_extra_docker="${CW_EXTRA_DOCKER_FLAGS:-}"
+    local _GHWATCH_MERGED_INSTR_FILE=""
 
     # Helper: validate dir and set CW_CONFIG_FLAG for this invocation only.
     # Caller must restore _saved_config_flag on all exit paths.
@@ -98,11 +136,14 @@ gh-watch() {
             local ws board_flag extra
             _ghwatch_parse_run_args "$@" || return 1
             _ghwatch_apply_dir "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; return 1; }
+            _ghwatch_merge_instructions "${ws}"
             _cw_dock_cmd \
                 "${CW_COPILOT_BOOTSTRAP}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir /logs ${board_flag}${extra}" \
                 "${ws}"
             local _rc=$?
             CW_CONFIG_FLAG="${_saved_config_flag}"
+            CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+            [[ -n "$_GHWATCH_MERGED_INSTR_FILE" ]] && rm -f "$_GHWATCH_MERGED_INSTR_FILE"
             return $_rc
             ;;
 
@@ -119,6 +160,7 @@ gh-watch() {
             set -- "${remaining[@]}"
             _ghwatch_parse_run_args "$@" || return 1
             _ghwatch_apply_dir "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; return 1; }
+            _ghwatch_merge_instructions "${ws}"
 
             local cname
             cname="$(_ghwatch_container_name "${ws}${dir_config_flag:+-$dir_config_flag}")"
@@ -126,6 +168,8 @@ gh-watch() {
             if docker ps -q --filter "name=^${cname}$" | grep -q .; then
                 echo "⚠️  Watcher already running (${cname})" >&2
                 CW_CONFIG_FLAG="${_saved_config_flag}"
+                CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+                [[ -n "$_GHWATCH_MERGED_INSTR_FILE" ]] && rm -f "$_GHWATCH_MERGED_INSTR_FILE"
                 return 1
             fi
             docker rm -f "${cname}" 2>/dev/null || true
@@ -136,6 +180,9 @@ gh-watch() {
             echo "🚀 Starting watcher → ${cname}"
             _cw_dock_bg "${cmd}" "${ws}" "${cname}"
             CW_CONFIG_FLAG="${_saved_config_flag}"
+            CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+            # Note: merged file kept alive — container reads it after start.
+            # It will be cleaned up on next gh-watch invocation or shell exit.
             echo "✅ Watcher started"
             local host_config=""
             [ -n "${dir_config_flag}" ] && host_config="${ws}/${dir_config_flag}/config.yml"
