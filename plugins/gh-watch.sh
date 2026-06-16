@@ -71,19 +71,28 @@ _ghwatch_merge_instructions() {
 
     # Derive a stable key from the workspace path so concurrent watchers don't
     # overwrite each other's file in the shared volume.
-    local _safe_name
+    # Derive a collision-resistant key: basename + short hash of canonical path.
+    local _safe_name _hash
     _safe_name=$(basename "${_ws}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/-*$//')
-    local _vol_path="/data/instructions/${_safe_name}/copilot-instructions.md"
+    _hash=$(printf '%s' "$(cd "${_ws}" 2>/dev/null && pwd || echo "${_ws}")" \
+            | md5sum 2>/dev/null | cut -c1-8 \
+            || printf '%s' "${_ws}" | cksum | awk '{print $1}')
+    local _vol_path="/data/instructions/${_safe_name}-${_hash}/copilot-instructions.md"
 
     # Copy the merged file into the named volume via a one-shot container.
-    docker run --rm \
+    # Docker auto-creates the named volume on first use if it doesn't exist yet.
+    if ! docker run --rm \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
         -v "${_tmp}:/src/copilot-instructions.md:ro" \
-        alpine:latest sh -c "
-            mkdir -p /data/instructions/${_safe_name}
+        alpine:3.19 sh -c "
+            mkdir -p /data/instructions/${_safe_name}-${_hash}
             cp /src/copilot-instructions.md ${_vol_path}
-        " >/dev/null && echo "[gh-watch] Merged instructions written to volume (${_vol_path})" || \
-        echo "[gh-watch] WARNING: failed to write instructions to volume — skipping" >&2
+        " >/dev/null; then
+        echo "[gh-watch] WARNING: failed to write instructions to volume — aborting" >&2
+        rm -f "$_tmp"
+        return 1
+    fi
+    echo "[gh-watch] Merged instructions written to volume (${_vol_path})"
 
     rm -f "$_tmp"
 
@@ -144,6 +153,7 @@ gh-watch() {
     # pollute the shell session after this call returns.
     local _saved_config_flag="${CW_CONFIG_FLAG}"
     local _saved_extra_docker="${CW_EXTRA_DOCKER_FLAGS:-}"
+    local _saved_instruct_vol_path="${CW_INSTRUCT_VOL_PATH:-}"
 
     # Helper: validate dir and set CW_CONFIG_FLAG for this invocation only.
     # Caller must restore _saved_config_flag on all exit paths.
@@ -164,13 +174,14 @@ gh-watch() {
             local ws board_flag extra
             _ghwatch_parse_run_args "$@" || return 1
             _ghwatch_apply_dir "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; return 1; }
-            _ghwatch_merge_instructions "${ws}"
+            _ghwatch_merge_instructions "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"; return 1; }
             _cw_dock_cmd \
                 "${CW_COPILOT_BOOTSTRAP}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir /logs ${board_flag}${extra}" \
                 "${ws}"
             local _rc=$?
             CW_CONFIG_FLAG="${_saved_config_flag}"
             CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+            CW_INSTRUCT_VOL_PATH="${_saved_instruct_vol_path}"
             return $_rc
             ;;
 
@@ -187,7 +198,7 @@ gh-watch() {
             set -- "${remaining[@]}"
             _ghwatch_parse_run_args "$@" || return 1
             _ghwatch_apply_dir "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; return 1; }
-            _ghwatch_merge_instructions "${ws}"
+            _ghwatch_merge_instructions "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"; return 1; }
 
             local cname
             cname="$(_ghwatch_container_name "${ws}${dir_config_flag:+-$dir_config_flag}")"
@@ -196,6 +207,7 @@ gh-watch() {
                 echo "⚠️  Watcher already running (${cname})" >&2
                 CW_CONFIG_FLAG="${_saved_config_flag}"
                 CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+                CW_INSTRUCT_VOL_PATH="${_saved_instruct_vol_path}"
                 return 1
             fi
             docker rm -f "${cname}" 2>/dev/null || true
@@ -207,6 +219,7 @@ gh-watch() {
             _cw_dock_bg "${cmd}" "${ws}" "${cname}"
             CW_CONFIG_FLAG="${_saved_config_flag}"
             CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"
+            CW_INSTRUCT_VOL_PATH="${_saved_instruct_vol_path}"
             echo "✅ Watcher started"
             local host_config=""
             [ -n "${dir_config_flag}" ] && host_config="${ws}/${dir_config_flag}/config.yml"

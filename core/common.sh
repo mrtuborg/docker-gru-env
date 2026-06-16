@@ -45,11 +45,14 @@ CW_AUTH_BOOTSTRAP='if [ -n "${GH_TOKEN:-}" ]; then export GITHUB_TOKEN="${GITHUB
 CW_SKILLS_BOOTSTRAP='/tools/gru/install-skills.sh 2>/dev/null || true; if [ -d /workspace/skills ]; then _sd="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"; mkdir -p "$_sd"; for _sk in /workspace/skills/*/; do [ -d "$_sk" ] && rm -rf "$_sd/$(basename "$_sk")" && cp -r "$_sk" "$_sd/"; done; fi'
 
 # Shell snippet that installs the merged copilot-instructions.md from the
-# gru-instructions volume into /workspace/.github/ when the background watcher
-# starts. CW_INSTRUCT_VOL_PATH (set by gh-watch start) points to the file inside
-# the volume mounted at /data/instructions. This survives terminal close because
-# the volume is owned by Docker, not the host shell.
-CW_INSTRUCT_BOOTSTRAP='if [ -n "${CW_INSTRUCT_VOL_PATH:-}" ] && [ -f "${CW_INSTRUCT_VOL_PATH}" ]; then mkdir -p /workspace/.github && cp "${CW_INSTRUCT_VOL_PATH}" /workspace/.github/copilot-instructions.md && echo "[cw] Installed merged instructions from volume"; fi'
+# gru-instructions volume at container startup. CW_INSTRUCT_VOL_PATH points to
+# the file inside the volume (mounted at /data/instructions).
+#
+# The file is copied to /root/.github/copilot-instructions.md — a container-local
+# path that is NOT inside the workspace bind-mount, so the host repo is never
+# dirtied. Copilot CLI scans parent directories for copilot-instructions.md, so
+# placing it in /root/.github/ makes it visible from any working directory.
+CW_INSTRUCT_BOOTSTRAP='if [ -n "${CW_INSTRUCT_VOL_PATH:-}" ] && [ -f "${CW_INSTRUCT_VOL_PATH}" ]; then mkdir -p /root/.github && cp "${CW_INSTRUCT_VOL_PATH}" /root/.github/copilot-instructions.md && echo "[cw] Installed merged instructions from volume (host repo unchanged)"; fi'
 
 # The standalone copilot CLI is baked into the image, so the Copilot bootstrap is
 # just authentication (kept as a separate name for the copilot/watcher plugins).
