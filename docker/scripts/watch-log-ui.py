@@ -1190,7 +1190,13 @@ function renderPipeline() {
 
 // ── Render: Completed ─────────────────────────────────────────────────────────
 function renderCompleted() {
-  if (!doneIssues.length) {
+  // Only show issues that belong to the current project board
+  const boardNums = new Set(boardItems.map(i => i.number));
+  const filtered  = boardNums.size > 0
+    ? doneIssues.filter(it => boardNums.has(it.num))
+    : doneIssues;
+
+  if (!filtered.length) {
     document.getElementById('done-section').classList.add('hidden');
     document.getElementById('stats-section').classList.add('hidden');
     return;
@@ -1198,7 +1204,7 @@ function renderCompleted() {
   document.getElementById('done-section').classList.remove('hidden');
   // Deduplicate by issue number — keep the last (final) entry per issue
   const seen = new Map();
-  doneIssues.forEach(it => seen.set(it.num, it));
+  filtered.forEach(it => seen.set(it.num, it));
   const unique = [...seen.values()];
   document.getElementById('done-list').innerHTML = unique.map(it => {
     const ok   = it.status === 'completed';
