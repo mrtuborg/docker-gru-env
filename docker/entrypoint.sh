@@ -69,8 +69,17 @@ fi
 
 mkdir -p /data/copilot /logs
 
-# Sanity-check: verify the watcher config resolves prompts_dir correctly before starting.
-_cfg="/workspace/hil-stress/config.yml"
+# BOARD_DIR selects which subdirectory of /workspace contains config.yml.
+# Matches the DIR argument passed to `gh-watch <DIR> start` on the host.
+# Default: hil-stress (backward-compatible).
+_board_dir="${BOARD_DIR:-hil-stress}"
+_cfg="/workspace/${_board_dir}/config.yml"
+
+# Sanity-check: verify the config and its prompts_dir exist before starting.
+if [[ ! -f "$_cfg" ]]; then
+  echo "[entrypoint] FATAL: config not found: ${_cfg} (set BOARD_DIR to the correct subdir)"
+  exit 1
+fi
 _prompts_dir=$(python3 -c "
 import yaml, os, sys
 c = yaml.safe_load(open('$_cfg'))
@@ -78,15 +87,15 @@ d = c.get('watcher', {}).get('prompts_dir', '')
 print(os.path.normpath(os.path.join(os.path.dirname('$_cfg'), d)))
 " 2>/dev/null)
 if [[ -z "$_prompts_dir" || ! -d "$_prompts_dir" ]]; then
-  echo "[entrypoint] FATAL: watcher.prompts_dir '${_prompts_dir}' does not exist — check hil-stress/config.yml"
+  echo "[entrypoint] FATAL: watcher.prompts_dir '${_prompts_dir}' does not exist — check ${_board_dir}/config.yml"
   exit 1
 fi
-echo "[entrypoint] Config OK — prompts_dir: $_prompts_dir"
+echo "[entrypoint] Board dir: ${_board_dir} — config OK, prompts_dir: $_prompts_dir"
 
 echo "[entrypoint] Starting watcher-run.sh..."
 OVERNIGHT_ARGS="${OVERNIGHT_ARGS:-}"
 exec /tools/gru/scripts/watcher-run.sh \
-  --config /workspace/hil-stress/config.yml \
+  --config "${_cfg}" \
   --workspace-dir /workspace \
   --log-dir /logs \
   ${OVERNIGHT_ARGS}
