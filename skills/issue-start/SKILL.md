@@ -59,7 +59,7 @@ GH_HOST=<host> gh api graphql -f query='
         number: .content.number,
         title: .content.title,
         url: .content.url,
-        repo: (.content.url | capture("https?://[^/]+/(?P<r>[^/]+/[^/]+)/issues/").r),
+        repo: (.content.url | capture("https?://[^/]+/(?<r>[^/]+/[^/]+)/issues/").r),
         stage: (.fieldValues.nodes[] | select(.field.name=="Status") | .name)
       }
     | select(.stage=="Todo")]

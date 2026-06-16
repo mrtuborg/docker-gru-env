@@ -190,7 +190,8 @@ STAGE_ORDER="${STAGE_ORDER:-Todo|In progress}"
 # ALLOWED_REPOS: space-separated list of owner/repo pairs whose issues this board may process.
 # Always includes REPO (data_repo) regardless of config — union at runtime.
 ALLOWED_REPOS="${ALLOWED_REPOS:-}"
-[[ "$ALLOWED_REPOS" != *"$REPO"* ]] && ALLOWED_REPOS="${REPO}${ALLOWED_REPOS:+ $ALLOWED_REPOS}"
+printf '%s\n' $ALLOWED_REPOS | grep -qxF "$REPO" \
+  || ALLOWED_REPOS="${REPO}${ALLOWED_REPOS:+ $ALLOWED_REPOS}"
 
 # Built-in stage handlers live here; consumer dir overlays on top.
 BUILTIN_STAGES_DIR="$(dirname "$SCRIPT_DIR")/stage-prompts"
