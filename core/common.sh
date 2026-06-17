@@ -42,7 +42,7 @@ CW_AUTH_BOOTSTRAP='if [ -n "${GH_TOKEN:-}" ]; then export GITHUB_TOKEN="${GITHUB
 #      merges with) the same-named built-in, so workspace skills truly override.
 # Mirrors the two-step logic in entrypoint.sh so Path 1 (gh-watch bind-mount)
 # and Path 2 (entrypoint fresh-clone) install skills identically.
-CW_SKILLS_BOOTSTRAP='/tools/gru/install-skills.sh 2>/dev/null || true; if [ -d /workspace/skills ]; then _sd="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"; mkdir -p "$_sd"; for _sk in /workspace/skills/*/; do [ -d "$_sk" ] && rm -rf "$_sd/$(basename "$_sk")" && cp -r "$_sk" "$_sd/"; done; fi'
+CW_SKILLS_BOOTSTRAP='/tools/gru/install-skills.sh 2>/dev/null || true; if [ -d /workspace/skills ]; then _sd="$HOME/.copilot/skills"; mkdir -p "$_sd"; for _sk in /workspace/skills/*/; do [ -d "$_sk" ] && rm -rf "$_sd/$(basename "$_sk")" && cp -r "$_sk" "$_sd/"; done; fi'
 
 # Shell snippet that installs the merged copilot-instructions.md from the
 # gru-instructions volume at container startup. CW_INSTRUCT_VOL_PATH points to

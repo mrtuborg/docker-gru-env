@@ -81,6 +81,7 @@ CONSUMER_PROMPTS_DIR=""  # resolved after config load
 WORKING_DIR=""           # directory to run sessions from (defaults to cwd)
 RESUME=false             # --resume: load state file and skip already-completed issues
 STATE_FILE=""            # explicit path to state file (auto-derived when empty)
+MODEL=""                 # --model: Copilot model override (also set via watcher.model in config)
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -101,6 +102,7 @@ while [[ $# -gt 0 ]]; do
     --workspace-dir)  WORKING_DIR="$2";  shift 2 ;;  # alias used by docker/entrypoint.sh
     --resume)         RESUME=true;       shift   ;;
     --state-file)     STATE_FILE="$2";   shift 2 ;;
+    --model)          MODEL="$2";        shift 2 ;;
     *) echo "Unknown argument: $1"; exit 1 ;;
   esac
 done
@@ -183,6 +185,10 @@ except Exception:
 ")
   fi
   unset _allowed_repos_raw
+  # Load optional model setting (watcher.model); if set, passed as --model to gh copilot.
+  _model=$(_cfg_optional watcher.model || true)
+  [[ -n "${_model:-}" ]] && MODEL="$_model"
+  unset _model
 fi
 
 # Default STAGE_ORDER if not set from config (built-in: Todo, In progress)
@@ -970,6 +976,8 @@ print('yes' if 'human-only' in names else 'no')
   ISSUE_EXIT=0
   _SESSION_TIMEOUT_HOURS="${SESSION_TIMEOUT_HOURS:-$(_cfg_optional watcher.session_timeout_hours || echo '')}"
   _SESSION_TIMEOUT_HOURS="${_SESSION_TIMEOUT_HOURS:-4}"
+  _MODEL_FLAG=""
+  [[ -n "${MODEL:-}" ]] && _MODEL_FLAG="--model ${MODEL}"
   if [[ -n "$LOG_DIR" ]]; then
     ISSUE_LOG="$LOG_DIR/issue-${ISSUE_NUM}-${DATE_TAG}.log"
     ISSUE_MD="$LOG_DIR/issue-${ISSUE_NUM}-${DATE_TAG}-session.md"
@@ -977,6 +985,7 @@ print('yes' if 'human-only' in names else 'no')
     if (cd "$SESSION_DIR" && GH_HOST="$GH_HOST" \
         timeout "${_SESSION_TIMEOUT_HOURS}h" \
         gh copilot -- \
+        ${_MODEL_FLAG:+$_MODEL_FLAG} \
         -p "$PROMPT" \
         --yolo \
         --no-ask-user \
@@ -990,6 +999,7 @@ print('yes' if 'human-only' in names else 'no')
     if ! (cd "$SESSION_DIR" && GH_HOST="$GH_HOST" \
         timeout "${_SESSION_TIMEOUT_HOURS}h" \
         gh copilot -- \
+        ${_MODEL_FLAG:+$_MODEL_FLAG} \
         -p "$PROMPT" \
         --yolo \
         --no-ask-user); then

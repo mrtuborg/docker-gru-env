@@ -6,7 +6,7 @@
 set -euo pipefail
 
 SKILLS_SRC="$(cd "$(dirname "$0")/skills" && pwd)"
-SKILLS_DST="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"
+SKILLS_DST="$HOME/.copilot/skills"
 
 mkdir -p "$SKILLS_DST"
 
