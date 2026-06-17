@@ -82,6 +82,9 @@ WORKING_DIR=""           # directory to run sessions from (defaults to cwd)
 RESUME=false             # --resume: load state file and skip already-completed issues
 STATE_FILE=""            # explicit path to state file (auto-derived when empty)
 MODEL=""                 # --model: Copilot model override (also set via watcher.model in config)
+MODELS_LIST=()           # ordered list of models to try (priority 1 first, cheapest last)
+CURRENT_MODEL_IDX=0      # index into MODELS_LIST currently in use
+MODEL_CONSEC_FAIL=0      # consecutive session failures on current model; triggers fallback at 3
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -185,11 +188,39 @@ except Exception:
 ")
   fi
   unset _allowed_repos_raw
-  # Load optional model setting (watcher.model); if set, passed as --model to gh copilot.
-  _model=$(_cfg_optional watcher.model || true)
-  [[ -n "${_model:-}" ]] && MODEL="$_model"
-  unset _model
+  # Load watcher.models (list of {model, priority} items) — enables model fallback.
+  # Falls back to watcher.model (single string) for backward compat.
+  _raw_models=$(python3 - "$CONFIG_PATH" << 'PYEOF' 2>/dev/null
+import sys, yaml
+try:
+    conf = yaml.safe_load(open(sys.argv[1]))
+    models = conf.get('watcher', {}).get('models', [])
+    if models:
+        models.sort(key=lambda m: m.get('priority', 99) if isinstance(m, dict) else 99)
+        for m in models:
+            name = m.get('model', '') if isinstance(m, dict) else str(m)
+            if name:
+                print(name)
+except Exception:
+    pass
+PYEOF
+  )
+  if [[ -n "$_raw_models" ]]; then
+    while IFS= read -r _m; do MODELS_LIST+=("$_m"); done <<< "$_raw_models"
+  fi
+  unset _raw_models _m
+  # Singular watcher.model is still supported when models list is absent.
+  if [[ ${#MODELS_LIST[@]} -eq 0 ]]; then
+    _model=$(_cfg_optional watcher.model || true)
+    [[ -n "${_model:-}" ]] && MODEL="$_model" && MODELS_LIST=("$_model")
+    unset _model
+  fi
 fi
+
+# If --model was passed on CLI, it seeds the list (overrides config; no fallback).
+[[ -n "${MODEL:-}" && ${#MODELS_LIST[@]} -eq 0 ]] && MODELS_LIST=("$MODEL")
+# Set active model from list position 0 (re-set at runtime if fallback triggers).
+[[ ${#MODELS_LIST[@]} -gt 0 ]] && MODEL="${MODELS_LIST[0]}"
 
 # Default STAGE_ORDER if not set from config (built-in: Todo, In progress)
 STAGE_ORDER="${STAGE_ORDER:-Todo|In progress}"
@@ -976,8 +1007,11 @@ print('yes' if 'human-only' in names else 'no')
   ISSUE_EXIT=0
   _SESSION_TIMEOUT_HOURS="${SESSION_TIMEOUT_HOURS:-$(_cfg_optional watcher.session_timeout_hours || echo '')}"
   _SESSION_TIMEOUT_HOURS="${_SESSION_TIMEOUT_HOURS:-4}"
+  # Refresh MODEL from MODELS_LIST in case fallback advanced the index.
+  [[ ${#MODELS_LIST[@]} -gt 0 ]] && MODEL="${MODELS_LIST[$CURRENT_MODEL_IDX]}"
   _MODEL_FLAG=""
   [[ -n "${MODEL:-}" ]] && _MODEL_FLAG="--model ${MODEL}"
+  [[ -n "${MODEL:-}" ]] && echo "  Model: ${MODEL} (priority $((CURRENT_MODEL_IDX + 1))/${#MODELS_LIST[@]})"
   if [[ -n "$LOG_DIR" ]]; then
     ISSUE_LOG="$LOG_DIR/issue-${ISSUE_NUM}-${DATE_TAG}.log"
     ISSUE_MD="$LOG_DIR/issue-${ISSUE_NUM}-${DATE_TAG}-session.md"
@@ -1062,10 +1096,21 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
     echo "✓ Issue #$ISSUE_NUM completed  ($(date))"
     DONE=$((DONE + 1))
     _state_write "${ISSUE_REPO}:${ISSUE_NUM}:${ISSUE_STAGE}" 2>/dev/null || true
+    MODEL_CONSEC_FAIL=0   # success: reset failure counter for current model
   else
     echo "✗ Issue #$ISSUE_NUM failed  ($(date))"
     FAILED=$((FAILED + 1))
     _state_write "" 2>/dev/null || true
+    # Model fallback: after 3 consecutive failures advance to the next cheaper model.
+    if [[ ${#MODELS_LIST[@]} -gt 1 ]]; then
+      MODEL_CONSEC_FAIL=$((MODEL_CONSEC_FAIL + 1))
+      if [[ $MODEL_CONSEC_FAIL -ge 3 && $CURRENT_MODEL_IDX -lt $((${#MODELS_LIST[@]} - 1)) ]]; then
+        CURRENT_MODEL_IDX=$((CURRENT_MODEL_IDX + 1))
+        MODEL="${MODELS_LIST[$CURRENT_MODEL_IDX]}"
+        MODEL_CONSEC_FAIL=0
+        echo "⚠  3 consecutive failures — switching to fallback model: ${MODEL} (priority $((CURRENT_MODEL_IDX + 1))/${#MODELS_LIST[@]})"
+      fi
+    fi
   fi
 
   # If this was the last allowed attempt AND the issue didn't advance, post a
