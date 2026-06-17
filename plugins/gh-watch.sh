@@ -48,9 +48,15 @@ _ghwatch_merge_instructions() {
         echo "[gh-watch] WARNING: defaults not found at ${_defaults} — container instructions will be workspace-only" >&2
     fi
 
-    # Build merged content in a temp file first, then copy into the volume.
-    local _tmp
-    _tmp=$(mktemp /tmp/gru-merged-instructions.XXXXXX)
+    # Build merged content in a temp directory first, then copy into the volume.
+    # We mount a directory (not a bare file) to avoid macOS Docker Desktop silently
+    # creating a directory at the target when it cannot bind-mount a plain file.
+    local _tmpdir _tmp
+    # Use $HOME for the temp dir — Docker Desktop always shares /Users on macOS,
+    # whereas /tmp (→ /private/tmp) is not accessible inside containers.
+    _tmpdir=$(mktemp -d "${HOME}/.cache/gru-merged-instructions.XXXXXX" 2>/dev/null \
+              || mktemp -d "${HOME}/gru-merged-instructions.XXXXXX")
+    _tmp="${_tmpdir}/copilot-instructions.md"
 
     if [[ -f "$_workspace_instr" && -f "$_defaults" ]]; then
         {
@@ -65,7 +71,7 @@ _ghwatch_merge_instructions() {
     elif [[ -f "$_defaults" ]]; then
         cp "$_defaults" "$_tmp"
     else
-        rm -f "$_tmp"
+        rm -rf "$_tmpdir"
         return 0  # nothing to mount
     fi
 
@@ -80,21 +86,23 @@ _ghwatch_merge_instructions() {
     local _vol_path="/data/instructions/${_safe_name}-${_hash}/copilot-instructions.md"
 
     # Copy the merged file into the named volume via a one-shot container.
+    # Mount the temp directory (not the file directly) so Docker Desktop on macOS
+    # always gets a directory bind-mount, which it handles reliably.
     # Docker auto-creates the named volume on first use if it doesn't exist yet.
     if ! docker run --rm \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
-        -v "${_tmp}:/src/copilot-instructions.md:ro" \
+        -v "${_tmpdir}:/src:ro" \
         alpine:3.19 sh -c "
             mkdir -p /data/instructions/${_safe_name}-${_hash}
             cp /src/copilot-instructions.md ${_vol_path}
         " >/dev/null; then
         echo "[gh-watch] WARNING: failed to write instructions to volume — aborting" >&2
-        rm -f "$_tmp"
+        rm -rf "$_tmpdir"
         return 1
     fi
     echo "[gh-watch] Merged instructions written to volume (${_vol_path})"
 
-    rm -f "$_tmp"
+    rm -rf "$_tmpdir"
 
     # Pass the volume-internal path to the container — CW_INSTRUCT_BOOTSTRAP reads it.
     # The volume itself is already mounted at /data/instructions by _cw_dock_bg.
