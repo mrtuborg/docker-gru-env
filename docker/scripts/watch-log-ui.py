@@ -59,7 +59,11 @@ def load_config(path):
         cfg['project_number']  = _yaml_int(txt, 'number') or 0
         cfg['project_name']    = _yaml_scalar(txt, 'name') or 'Watcher Board'
         cfg['stage_order']     = _yaml_list(txt, 'stage_order') or ['Todo', 'In Progress', 'Done']
+        cfg['queue_stages']    = _yaml_list(txt, 'queue_stages') or []
         cfg['device_status_file'] = _yaml_scalar(txt, 'device_status_file') or ''
+    # Default queue_stages to the first entry in stage_order if not explicitly set.
+    if not cfg.get('queue_stages') and cfg.get('stage_order'):
+        cfg['queue_stages'] = [cfg['stage_order'][0]]
     return cfg
 
 
@@ -446,6 +450,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json({'error': str(e), 'items': [], 'raw': data})
             return
         self._json({'items': items, 'stage_order': self.config.get('stage_order', []),
+                    'queue_stages': self.config.get('queue_stages', []),
                     'project_name': self.config.get('project_name', '')})
 
     def _status(self):
@@ -935,7 +940,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div class="flex items-center gap-2 mb-3">
       <span class="section-label" style="margin:0">Queue</span>
       <span id="queue-count" style="font-size:10px;padding:1px 7px;border-radius:20px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);">0</span>
-      <span class="text-xs col-muted ml-auto">Todo — next to process</span>
+      <span id="queue-subtitle" class="text-xs col-muted ml-auto">Next to process</span>
     </div>
     <div id="queue-list" class="flex-1">
       <p class="text-xs col-muted italic">No issues in Todo</p>
@@ -1057,6 +1062,7 @@ function toggleLog() {
 let boardItems  = [];
 let boardLoaded = false;   // true after first successful /api/board response
 let stageOrder  = [];
+let queueStages = ['Todo'];  // overridden by config via /api/board
 let projName    = '';
 let activeIssue = null;   // {num, stage, started}
 let doneIssues  = [];
@@ -1166,7 +1172,7 @@ function renderNow() {
 function renderQueue() {
   const activeNum = activeIssue ? activeIssue.num : null;
   const queue = boardItems
-    .filter(i => i.status === 'Todo' && i.state === 'OPEN' && i.number !== activeNum
+    .filter(i => queueStages.includes(i.status) && i.state === 'OPEN' && i.number !== activeNum
                  && !i.is_parent && !(i.labels || []).includes('human-only'))
     .sort((a, b) => a.number - b.number);
 
@@ -1174,7 +1180,7 @@ function renderQueue() {
 
   const list = document.getElementById('queue-list');
   if (queue.length === 0) {
-    list.innerHTML = '<p class="text-xs col-muted italic">No issues in Todo</p>';
+    list.innerHTML = '<p class="text-xs col-muted italic">No issues in queue</p>';
     return;
   }
   list.innerHTML = queue.map((it, idx) => `
@@ -1197,7 +1203,7 @@ function renderPipeline() {
   let item = boardItems.find(i => i.number === activeNum);
 
   // Board may lag — synthesise a minimal item from watcher state
-  if (!item || item.status === 'Todo' || item.status === 'Done') {
+  if (!item || queueStages.includes(item.status) || item.status === 'Done') {
     item = item
       ? { ...item, status: activeIssue.stage || 'HW-Check' }
       : { number: activeNum, title: `Issue #${activeNum}`, url: '', status: activeIssue.stage || 'HW-Check' };
@@ -1251,6 +1257,7 @@ async function refreshBoard() {
     boardItems  = d.items || [];
     boardLoaded = true;
     stageOrder = d.stage_order || [];
+    queueStages = (d.queue_stages && d.queue_stages.length) ? d.queue_stages : ['Todo'];
     projName   = d.project_name || 'Watcher Board';
     document.getElementById('project-name').textContent = projName;
     document.getElementById('last-refresh').textContent = 'Updated ' + new Date().toLocaleTimeString();
