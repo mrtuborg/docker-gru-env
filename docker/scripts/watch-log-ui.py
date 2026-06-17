@@ -394,6 +394,8 @@ class Handler(BaseHTTPRequestHandler):
             self._devices()
         elif path == '/api/logs':
             self._logs_sse()
+        elif path == '/api/logs/snapshot':
+            self._logs_snapshot()
         elif path == '/api/status':
             self._status()
         else:
@@ -466,6 +468,16 @@ class Handler(BaseHTTPRequestHandler):
             self._json(data)
         except Exception as e:
             self._json({'devices': [], 'error': str(e)})
+
+    def _logs_snapshot(self):
+        lines = self.logs.tail(2000)
+        body = '\n'.join(lines).encode('utf-8', errors='replace')
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/plain; charset=utf-8')
+        self.send_header('Content-Length', str(len(body)))
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        self.wfile.write(body)
 
     def _logs_sse(self):
         self.send_response(200)
@@ -970,10 +982,16 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
 <!-- ── Full log ────────────────────────────────────────────────────────────── -->
 <div>
-  <button class="log-toggle" onclick="toggleLog()">
-    <span id="log-arrow">▶</span>
-    <span style="color:var(--muted)">Full log</span>
-  </button>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <button class="log-toggle" onclick="toggleLog()">
+      <span id="log-arrow">▶</span>
+      <span style="color:var(--muted)">Full log</span>
+    </button>
+    <a href="/api/logs/snapshot" target="_blank" class="log-toggle" style="text-decoration:none;gap:4px;">
+      <span style="font-size:10px;">↗</span>
+      <span style="color:var(--muted)">open raw</span>
+    </a>
+  </div>
   <div id="log-section" class="hidden">
     <div class="card" style="padding:10px;margin-top:6px;">
       <div id="log-panel"></div>
