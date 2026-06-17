@@ -995,6 +995,37 @@ print('yes' if 'human-only' in names else 'no')
     continue
   fi
   unset _is_human_only
+  # Skip issues labelled 'needs-human' when no human has responded yet.
+  # The agent prompt also checks, but doing it here avoids a wasted session,
+  # the spurious "failed silently" warning, and the retry loop.
+  _is_needs_human=$(echo "$_issue_json" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+names = [l.get('name','') for l in d.get('labels',[])]
+print('yes' if 'needs-human' in names else 'no')
+" 2>/dev/null || echo "no")
+  if [[ "$_is_needs_human" == "yes" ]]; then
+    # Check whether a human commented after the last watcher/bot blocker comment.
+    _human_responded=$(GH_HOST="$GH_HOST" gh issue view "$ISSUE_NUM" --repo "$ISSUE_REPO" \
+      --json comments --jq '
+        ([.comments[] | select(.body | test("watcher|⚠️"))] | last | .createdAt // "") as $blocked |
+        [.comments[] |
+          select(.createdAt > $blocked
+            and .author.login != "github-actions[bot]"
+            and (.body | test("watcher|⚠️") | not))] | length' 2>/dev/null || echo "0")
+    if [[ "${_human_responded:-0}" -eq 0 ]]; then
+      echo "⊘  Pre-flight SKIP: issue #$ISSUE_NUM has 'needs-human' label with no human response — skipping."
+      _nh_key="ISSUE_ATTEMPTS__$(printf '%s__%s' "$ISSUE_NUM" "$ISSUE_STAGE" | tr -c 'a-zA-Z0-9_' '_')"
+      eval "${_nh_key}=${MAX_PER_ISSUE}"
+      unset _nh_key _human_responded _is_needs_human
+      SKIPPED=$((SKIPPED + 1))
+      CURRENT_ISSUE=""
+      unset _issue_json _issue_state
+      continue
+    fi
+    unset _human_responded
+  fi
+  unset _is_needs_human
   # Skip parent/epic issues that have sub-issues — they are human-managed trackers.
   # Auto-apply 'human-only' label so we never attempt them again.
   _sub_count=$(GH_HOST="$GH_HOST" gh api \
