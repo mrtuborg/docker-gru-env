@@ -175,8 +175,11 @@ gh-watch() {
             _ghwatch_parse_run_args "$@" || return 1
             _ghwatch_apply_dir "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; return 1; }
             _ghwatch_merge_instructions "${ws}" || { CW_CONFIG_FLAG="${_saved_config_flag}"; CW_EXTRA_DOCKER_FLAGS="${_saved_extra_docker}"; return 1; }
+            # Use workspace-relative log dir when DIR is set — logs land directly on host.
+            local _log_dir="/logs"
+            [[ -n "${dir_config_flag}" ]] && _log_dir="/workspace/${dir_config_flag}/logs"
             _cw_dock_cmd \
-                "${CW_COPILOT_BOOTSTRAP}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir /logs ${board_flag}${extra}" \
+                "${CW_COPILOT_BOOTSTRAP}; mkdir -p ${_log_dir}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir ${_log_dir} ${board_flag}${extra}" \
                 "${ws}"
             local _rc=$?
             CW_CONFIG_FLAG="${_saved_config_flag}"
@@ -213,7 +216,10 @@ gh-watch() {
             docker rm -f "${cname}" 2>/dev/null || true
 
             local git_setup="gh auth setup-git --hostname ${GH_HOST:-github.com} 2>/dev/null || true"
-            local cmd="${CW_COPILOT_BOOTSTRAP}; ${git_setup}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir /logs ${board_flag}${extra}"
+            # Use workspace-relative log dir when DIR is set — logs land directly on host.
+            local _log_dir="/logs"
+            [[ -n "${dir_config_flag}" ]] && _log_dir="/workspace/${dir_config_flag}/logs"
+            local cmd="${CW_COPILOT_BOOTSTRAP}; ${git_setup}; mkdir -p ${_log_dir}; /tools/gru/scripts/watcher-run.sh ${CW_CONFIG_FLAG} --working-dir /workspace --log-dir ${_log_dir} ${board_flag}${extra}"
 
             echo "🚀 Starting watcher → ${cname}"
             _cw_dock_bg "${cmd}" "${ws}" "${cname}"

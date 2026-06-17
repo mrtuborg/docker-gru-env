@@ -791,6 +791,66 @@ PICK_NUM=""
 PICK_REPO=""
 PICK_STAGE=""
 RUN_START_TS=$(date +%s)
+ISSUE_START_TS=0   # set just before each session; used for per-issue duration in summary
+
+# ---------------------------------------------------------------------------
+# Per-issue summary and failure helpers (write to LOG_DIR on the host)
+# ---------------------------------------------------------------------------
+
+# Append one row to run-summary.md after each session.
+_summary_append_row() {
+  local num="$1" stage="$2" exit_code="$3" model="${4:-}" start_ts="$5"
+  [[ -z "$LOG_DIR" ]] && return
+  local summary_file="$LOG_DIR/run-summary.md"
+  local ts icon duration first_error=""
+  ts=$(date -u '+%Y-%m-%d %H:%M UTC')
+  local elapsed=$(( $(date +%s) - start_ts ))
+  duration=$(printf "%dm%ds" "$(( elapsed / 60 ))" "$(( elapsed % 60 ))")
+  if [[ "$exit_code" -eq 0 ]]; then icon="✅"; elif [[ "$exit_code" -eq 124 ]]; then icon="⏱ timeout"; else icon="❌"; fi
+
+  # Extract first meaningful error line from the per-issue log.
+  local issue_log="$LOG_DIR/issue-${num}-${DATE_TAG}.log"
+  if [[ "$exit_code" -ne 0 && -f "$issue_log" ]]; then
+    first_error=$(grep -iEm1 "(CAPIError|model_not_supported|SESSION TIMEOUT|Execution failed|error.*400|FAIL[^S])" \
+      "$issue_log" 2>/dev/null | sed 's/^[[:space:]]*//' | cut -c1-100 || true)
+    [[ -z "$first_error" ]] && first_error=$(tail -3 "$issue_log" | tr '\n' ' ' | cut -c1-100)
+  fi
+
+  # Write header only once.
+  if [[ ! -f "$summary_file" ]]; then
+    printf '# Watcher Run Summary — %s\n\n' "$(date -u '+%Y-%m-%d')" > "$summary_file"
+    printf '| Time (UTC) | Issue | Stage | Result | Model | Duration | Error |\n' >> "$summary_file"
+    printf '|---|---|---|---|---|---|---|\n' >> "$summary_file"
+  fi
+
+  printf '| %s | #%s | %s | %s | %s | %s | %s |\n' \
+    "$ts" "$num" "$stage" "$icon" "${model:-—}" "$duration" "${first_error:-—}" >> "$summary_file"
+}
+
+# Append failure detail to failures.md when a session ends with non-zero exit.
+_failures_append() {
+  local num="$1" stage="$2" exit_code="$3"
+  [[ -z "$LOG_DIR" || "$exit_code" -eq 0 ]] && return
+  local fail_file="$LOG_DIR/failures.md"
+  local issue_log="$LOG_DIR/issue-${num}-${DATE_TAG}.log"
+  {
+    printf '## ❌ Issue #%s [%s] — %s\n\n' "$num" "$stage" "$(date -u '+%Y-%m-%d %H:%M UTC')"
+    if [[ -f "$issue_log" ]]; then
+      local err_lines
+      err_lines=$(grep -iE "(CAPIError|model_not_supported|SESSION TIMEOUT|Execution failed|error.*400|FAIL[^S])" \
+        "$issue_log" 2>/dev/null | grep -v "^[[:space:]]*[│└●]" | head -10 || true)
+      if [[ -n "$err_lines" ]]; then
+        printf '**Extracted errors:**\n```\n%s\n```\n\n' "$err_lines"
+      fi
+      printf '**Last 20 lines of session log:**\n```\n'
+      tail -20 "$issue_log"
+      printf '```\n\n'
+    else
+      printf '_No per-issue log found._\n\n'
+    fi
+    printf '**Full log:** `%s`\n\n---\n\n' "${issue_log}"
+  } >> "$fail_file"
+}
 
 # Count actionable (handler-present, not resume-skipped) issues for progress display.
 _TOTAL_ACTIONABLE=0
@@ -1003,6 +1063,7 @@ print('yes' if 'human-only' in names else 'no')
   _PRE_SESSION_SNAPSHOT=$(ls ~/.copilot/session-state/ 2>/dev/null | sort || true)
   _PRE_SESSION_ISSUE_REPO="$ISSUE_REPO"
   _PRE_SESSION_ISSUE_STAGE="$ISSUE_STAGE"
+  ISSUE_START_TS=$(date +%s)
 
   ISSUE_EXIT=0
   _SESSION_TIMEOUT_HOURS="${SESSION_TIMEOUT_HOURS:-$(_cfg_optional watcher.session_timeout_hours || echo '')}"
@@ -1111,7 +1172,11 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
         echo "⚠  3 consecutive failures — switching to fallback model: ${MODEL} (priority $((CURRENT_MODEL_IDX + 1))/${#MODELS_LIST[@]})"
       fi
     fi
+    # Write error excerpt for human review on host.
+    _failures_append "$ISSUE_NUM" "$ISSUE_STAGE" "$ISSUE_EXIT"
   fi
+  # Append one row to the run summary (human-readable on host).
+  _summary_append_row "$ISSUE_NUM" "$ISSUE_STAGE" "$ISSUE_EXIT" "${MODEL:-}" "$ISSUE_START_TS"
 
   # If this was the last allowed attempt AND the issue didn't advance, post a
   # comment flagging it for human review. Fires after the session so the attempt
@@ -1169,8 +1234,10 @@ echo "  $STATE_FILE"
 echo ""
 if [[ -n "$LOG_DIR" ]]; then
   echo "Logs saved to: $LOG_DIR"
-  echo "  Run log:          $RUN_LOG"
-  echo "  Per-issue logs:   $LOG_DIR/issue-*-${DATE_TAG}.log"
+  echo "  Run summary:         $LOG_DIR/run-summary.md"
+  [[ -f "$LOG_DIR/failures.md" ]] && echo "  Failure excerpts:    $LOG_DIR/failures.md"
+  echo "  Run log:             $RUN_LOG"
+  echo "  Per-issue logs:      $LOG_DIR/issue-*-${DATE_TAG}.log"
   echo "  Session transcripts: $LOG_DIR/issue-*-${DATE_TAG}-session.md"
   echo ""
 fi
