@@ -147,8 +147,11 @@ Flag any PR that clearly overlaps with the chosen issue before proceeding.
    ```
 
 3. Post a brief "starting" comment on the issue:
-   ```
-   Starting work on this issue. Reading acceptance criteria and planning approach.
+   ```bash
+   AUTHOR=$(git config user.name)
+   GH_HOST=<host> gh issue comment <N> --repo <issue_repo> --body "🤖 Automated agent — on behalf of $AUTHOR
+
+   Starting work on this issue. Reading acceptance criteria and planning approach."
    ```
 
 4. Write the **issue-refs.json sidecar** in the current session directory so downstream
@@ -242,6 +245,8 @@ When implementation is complete:
 
 2. Post a review comment on the issue with this structure:
    ```markdown
+   🤖 Automated agent — on behalf of <git config user.name>
+
    ## Review — <issue title>
 
    ### What was done
@@ -261,6 +266,8 @@ When implementation is complete:
 
 3. If a PR was opened for this issue: post a comment on the **issue** with the PR reference:
    ```
+   🤖 Automated agent — on behalf of <git config user.name>
+
    PR opened: #<PR_NUM> <title> — <url>
    ```
    Do **NOT** add the PR to the project board — only issues belong on the board.
@@ -281,6 +288,8 @@ If you cannot proceed without a human decision:
 
 2. Post a detailed blocker comment:
    ```markdown
+   🤖 Automated agent — on behalf of <git config user.name>
+
    ## Blocked — needs human input
 
    **What I need:** <exact question or decision>

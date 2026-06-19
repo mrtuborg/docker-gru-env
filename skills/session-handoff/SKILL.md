@@ -144,6 +144,8 @@ Also update **`## Shared`** at the bottom for facts that span all tracks (build 
    Use `<REVIEW_OPTION_ID>` from `platform-docs/project-board.md` for the active project.
    Post a progress comment on the issue:
    ```markdown
+   🤖 Automated agent — on behalf of <git config user.name>
+
    ## Paused — session ending
 
    **Progress:** <what was done>
