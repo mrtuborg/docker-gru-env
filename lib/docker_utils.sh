@@ -111,6 +111,25 @@ _seed_cw_data() {
     return 0
 }
 
+# Split caller-supplied docker flags in a way that works when this file is
+# sourced from either bash or zsh.
+_cw_split_extra_docker_flags() {
+    [ -n "${CW_EXTRA_DOCKER_FLAGS:-}" ] || return 0
+
+    CW_EXTRA_DOCKER_FLAGS="${CW_EXTRA_DOCKER_FLAGS}" python3 - <<'PY'
+import os
+import shlex
+import sys
+
+try:
+    for flag in shlex.split(os.environ.get("CW_EXTRA_DOCKER_FLAGS", "")):
+        print(flag)
+except ValueError as exc:
+    print(f"[cw] ERROR: invalid CW_EXTRA_DOCKER_FLAGS: {exc}", file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 # Shared docker run helper.
 #
 # Usage: _run_cw_docker <interactive:true|false> <command-string> [host_workspace_dir]
@@ -154,11 +173,14 @@ _run_cw_docker() {
     fi
 
     # Caller-supplied extra flags (e.g. additional -v mounts from consumer plugins).
-    # NOTE: values are word-split on IFS, so paths with spaces are not supported.
-    # For complex mounts use auto-mount logic below or extend _run_cw_docker directly.
+    # Tokenize shell-style so bash/zsh callers behave the same and quoted values work.
     local -a extra_flags=()
     if [ -n "${CW_EXTRA_DOCKER_FLAGS:-}" ]; then
-        read -r -a extra_flags <<< "${CW_EXTRA_DOCKER_FLAGS}"
+        local extra_flags_raw flag
+        extra_flags_raw="$(_cw_split_extra_docker_flags)" || return 1
+        while IFS= read -r flag; do
+            [ -n "${flag}" ] && extra_flags+=("${flag}")
+        done <<< "${extra_flags_raw}"
     fi
 
     # Auto-mount host credentials that are commonly needed inside the container.
@@ -225,10 +247,14 @@ _cw_dock_bg() {
         workdir="/workspace"
     fi
 
-    # Caller-supplied extra flags. NOTE: word-split on IFS — paths with spaces not supported.
+    # Caller-supplied extra flags. Tokenize shell-style so bash/zsh callers behave the same.
     local -a extra_flags=()
     if [ -n "${CW_EXTRA_DOCKER_FLAGS:-}" ]; then
-        read -r -a extra_flags <<< "${CW_EXTRA_DOCKER_FLAGS}"
+        local extra_flags_raw flag
+        extra_flags_raw="$(_cw_split_extra_docker_flags)" || return 1
+        while IFS= read -r flag; do
+            [ -n "${flag}" ] && extra_flags+=("${flag}")
+        done <<< "${extra_flags_raw}"
     fi
 
     # Auto-mount host credentials that are commonly needed inside the container.
