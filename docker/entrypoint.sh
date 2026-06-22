@@ -6,6 +6,17 @@ set -euo pipefail
 : "${WORKSPACE_REPO:?WORKSPACE_REPO must be set}"
 : "${GH_HOST:=github.com}"
 
+# Ensure writable home dirs — named volumes may have been created by an older
+# root-running container. Fix ownership so the non-root user can write here.
+# sudo is available because the Dockerfile grants passwordless sudo to gru.
+mkdir -p "${HOME}/.copilot" "${COPILOT_DATA_HOME:-/data/copilot}" /logs /data/instructions
+sudo chown -R "$(id -u):$(id -g)" \
+    "${HOME}/.copilot" \
+    "${COPILOT_DATA_HOME:-/data/copilot}" \
+    /logs \
+    /data/instructions \
+    2>/dev/null || true
+
 echo "[entrypoint] Authenticating gh CLI..."
 # gh 2.67+ exits with code 1 if you run `gh auth login` while GH_TOKEN is already
 # set in the environment (it uses the env var automatically).  Skip explicit login.
@@ -62,7 +73,7 @@ fi
 
 # Install built-in skills from docker-gru-env/skills/ into the Copilot skills dir.
 # Skills in the repo are the source of truth; the container has no persistent home dir.
-_skills_dest="$HOME/.copilot/skills"
+_skills_dest="${COPILOT_DATA_HOME:-$HOME/.copilot}/skills"
 if [[ -d /tools/gru/skills ]]; then
   mkdir -p "$_skills_dest"
   cp -r /tools/gru/skills/. "$_skills_dest/"

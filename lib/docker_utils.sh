@@ -162,7 +162,10 @@ _ensure_cw_image() {
     fi
 
     echo "Building image ${CW_IMAGE} from ${CW_DOCKERFILE}..."
-    docker build -t "${CW_IMAGE}" -f "${CW_DOCKERFILE}" "${PROJECT_TOP}" || {
+    docker build -t "${CW_IMAGE}" \
+        --build-arg USER_ID="$(id -u)" \
+        --build-arg USER_GID="$(id -g)" \
+        -f "${CW_DOCKERFILE}" "${PROJECT_TOP}" || {
         print_error "Failed to build image ${CW_IMAGE}"
         return 1
     }
@@ -282,14 +285,16 @@ _run_cw_docker() {
     fi
 
     # Auto-mount host credentials that are commonly needed inside the container.
-    [ -f "${HOME}/.gitconfig" ] && extra_flags+=(-v "${HOME}/.gitconfig:/root/.gitconfig:ro")
+    # Mount into /home/gru (the container user's home) rather than /root.
+    [ -f "${HOME}/.gitconfig" ] && extra_flags+=(-v "${HOME}/.gitconfig:/home/gru/.gitconfig:ro")
 
     docker run "${tty_flags[@]}" \
+        --user "$(id -u):$(id -g)" \
         -v "${PROJECT_TOP}:/tools/gru:ro" \
         -v "${PROJECT_TOP}/data:/tools/gru/data:rw" \
         -v "${PROJECT_TOP}/docs:/tools/gru/docs:rw" \
         "${workspace_flags[@]}" \
-        -v "${CW_SSH_PATH}:/root/.ssh:ro" \
+        -v "${CW_SSH_PATH}:/home/gru/.ssh:ro" \
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
@@ -358,14 +363,16 @@ _cw_dock_bg() {
     fi
 
     # Auto-mount host credentials that are commonly needed inside the container.
-    [ -f "${HOME}/.gitconfig" ] && extra_flags+=(-v "${HOME}/.gitconfig:/root/.gitconfig:ro")
+    # Mount into /home/gru (the container user's home) rather than /root.
+    [ -f "${HOME}/.gitconfig" ] && extra_flags+=(-v "${HOME}/.gitconfig:/home/gru/.gitconfig:ro")
 
     docker run -d --name "${container_name}" \
+        --user "$(id -u):$(id -g)" \
         -v "${PROJECT_TOP}:/tools/gru:ro" \
         -v "${PROJECT_TOP}/data:/tools/gru/data:rw" \
         -v "${PROJECT_TOP}/docs:/tools/gru/docs:rw" \
         "${workspace_flags[@]}" \
-        -v "${CW_SSH_PATH}:/root/.ssh:ro" \
+        -v "${CW_SSH_PATH}:/home/gru/.ssh:ro" \
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
