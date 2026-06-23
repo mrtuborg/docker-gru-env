@@ -1427,7 +1427,6 @@ def main():
     _Handler.device_status_path = device_status_path
 
     server = ThreadingHTTPServer(('0.0.0.0', port), _Handler)
-    print(f'Dashboard → http://localhost:{port}', flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
