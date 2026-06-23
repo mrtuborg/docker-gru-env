@@ -28,9 +28,87 @@ _ensure_gh_token() {
 # Obtain a short-lived Azure Storage access token from the host's authenticated
 # az session and export it as AZURE_STORAGE_TOKEN.  The container has no az
 # binary, so it cannot call DefaultAzureCredential's AzureCliCredential path.
-# Instead hil-download-bundles.sh reads this env var and builds a lightweight
-# StaticTokenCredential.  Token is valid for ~1h (Azure default).
+# Instead hil-download-bundles.sh reads AZURE_TOKEN_FILE and builds a lightweight
+# StaticTokenCredential that re-reads the file on each call, picking up refreshes
+# written by the background daemon started here.  Token is valid for ~1h (Azure
+# default); the daemon refreshes every 50 min so the file is always current.
+#
+# When the az refresh token expires (~24h), the daemon detects consecutive
+# failures and triggers `az login --use-device-code`, logging the device-code
+# URL to _AZURE_TOKEN_LOGFILE so the user can re-auth without restarting.
 # ---------------------------------------------------------------------------
+_AZURE_TOKEN_FILE="${AZURE_TOKEN_FILE:-/tmp/.azure-storage-token}"
+_AZURE_TOKEN_PIDFILE="/tmp/.azure-token-refresh.pid"
+_AZURE_TOKEN_LOGFILE="/tmp/.azure-token-refresh.log"
+
+# Start a background daemon on the host that refreshes _AZURE_TOKEN_FILE every
+# 50 minutes.  After 3 consecutive failures, triggers device-code login.
+# Safe to call multiple times — skips if daemon is already running.
+_start_azure_token_refresh() {
+    local _tf="$_AZURE_TOKEN_FILE"
+    if [ -f "$_AZURE_TOKEN_PIDFILE" ] && kill -0 "$(cat "$_AZURE_TOKEN_PIDFILE")" 2>/dev/null; then
+        return 0  # already running
+    fi
+    nohup bash -c '
+        _tf="'"$_tf"'"
+        _logfile="'"$_AZURE_TOKEN_LOGFILE"'"
+        _fail=0
+        _max_fail=3
+
+        _log() { echo "[$(date +%Y-%m-%dT%H:%M:%S%z)] $*"; }
+
+        _try_refresh() {
+            local tok
+            tok=$(az account get-access-token \
+                    --resource https://storage.azure.com/ \
+                    --query accessToken -o tsv 2>/dev/null)
+            if [ -n "$tok" ]; then
+                echo "$tok" > "$_tf"
+                chmod 600 "$_tf"
+                _fail=0
+                _log "✅ Token refreshed ($(echo "$tok" | wc -c | tr -d " ") bytes)"
+                return 0
+            fi
+            return 1
+        }
+
+        _device_code_login() {
+            _log "🔑 Refresh token expired — starting device-code login…"
+            _log "   Check ${_logfile} for the device-code URL"
+            if az login --use-device-code 2>&1; then
+                _log "✅ Device-code login succeeded"
+                _try_refresh
+                return $?
+            else
+                _log "❌ Device-code login failed — will retry in 50 min"
+                return 1
+            fi
+        }
+
+        _log "🚀 Azure token refresh daemon started (interval: 50 min, max_fail: ${_max_fail})"
+
+        while true; do
+            sleep 3000   # 50 minutes
+
+            if _try_refresh; then
+                continue
+            fi
+
+            _fail=$((_fail + 1))
+            _log "⚠️  Token refresh failed (attempt ${_fail}/${_max_fail})"
+
+            if [ "$_fail" -ge "$_max_fail" ]; then
+                _device_code_login
+                _fail=0
+            fi
+        done
+    ' >> "$_AZURE_TOKEN_LOGFILE" 2>&1 &
+    echo $! > "$_AZURE_TOKEN_PIDFILE"
+    disown $! 2>/dev/null || true
+    echo "[cw] Azure token refresh daemon started (PID $(cat "$_AZURE_TOKEN_PIDFILE"))"
+    echo "[cw] Refresh log: $_AZURE_TOKEN_LOGFILE"
+}
+
 _ensure_azure_token() {
     # Always refresh from az when available — a cached token may be expired.
     if command -v az >/dev/null 2>&1 && az account show >/dev/null 2>&1; then
@@ -40,13 +118,33 @@ _ensure_azure_token() {
                  --query accessToken -o tsv 2>/dev/null)
         if [ -n "$_tok" ]; then
             export AZURE_STORAGE_TOKEN="$_tok"
+            echo "$_tok" > "$_AZURE_TOKEN_FILE"
+            chmod 600 "$_AZURE_TOKEN_FILE"
+            _start_azure_token_refresh
         else
             echo "[cw] WARNING: az is authenticated but get-access-token failed." >&2
+            echo "[cw]          Attempting device-code login…" >&2
+            if az login --use-device-code; then
+                _tok=$(az account get-access-token \
+                         --resource https://storage.azure.com/ \
+                         --query accessToken -o tsv 2>/dev/null)
+                if [ -n "$_tok" ]; then
+                    export AZURE_STORAGE_TOKEN="$_tok"
+                    echo "$_tok" > "$_AZURE_TOKEN_FILE"
+                    chmod 600 "$_AZURE_TOKEN_FILE"
+                    _start_azure_token_refresh
+                fi
+            fi
         fi
-    elif [ -z "${AZURE_STORAGE_TOKEN:-}" ]; then
+    elif [ -n "${AZURE_STORAGE_TOKEN:-}" ]; then
+        echo "$AZURE_STORAGE_TOKEN" > "$_AZURE_TOKEN_FILE"
+        chmod 600 "$_AZURE_TOKEN_FILE"
+    else
         echo "[cw] WARNING: AZURE_STORAGE_TOKEN not set and az is not available/logged in." >&2
         echo "[cw]          Bundle downloads will fail. Run: az login" >&2
+        touch "$_AZURE_TOKEN_FILE"
     fi
+    export AZURE_TOKEN_FILE="$_AZURE_TOKEN_FILE"
 }
 
 # Ensure the docker-gru-env image exists, building it from docker/Dockerfile
@@ -195,10 +293,12 @@ _run_cw_docker() {
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
+        -v "${_AZURE_TOKEN_FILE}:${_AZURE_TOKEN_FILE}:ro" \
         "${extra_flags[@]}" \
         -e GH_TOKEN \
         -e GH_HOST \
         -e AZURE_STORAGE_TOKEN \
+        -e AZURE_TOKEN_FILE \
         -w "${workdir}" \
         --entrypoint /bin/bash \
         "${CW_IMAGE}" -lc "${cmd}"
@@ -269,10 +369,12 @@ _cw_dock_bg() {
         -v "${CW_DATA_VOLUME}:/data/copilot" \
         -v "${CW_LOGS_VOLUME}:/logs" \
         -v "${CW_INSTRUCT_VOLUME}:/data/instructions" \
+        -v "${_AZURE_TOKEN_FILE}:${_AZURE_TOKEN_FILE}:ro" \
         "${extra_flags[@]}" \
         -e GH_TOKEN \
         -e GH_HOST \
         -e AZURE_STORAGE_TOKEN \
+        -e AZURE_TOKEN_FILE \
         -w "${workdir}" \
         --entrypoint /bin/bash \
         "${CW_IMAGE}" -lc "${cmd}" >/dev/null
