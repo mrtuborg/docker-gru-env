@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon } from 'lucide-react'
+import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Plugins from './pages/Plugins'
 import Boards from './pages/Boards'
@@ -22,6 +22,8 @@ function useTheme() {
 function AppShell() {
   const { theme, toggle } = useTheme()
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const sidebarRef = useRef<HTMLElement>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -34,6 +36,20 @@ function AppShell() {
       .catch(() => setNeedsSetup(false))
   }, [])
 
+  // Close sidebar on click outside
+  useEffect(() => {
+    if (!sidebarOpen) return
+    const handler = (e: MouseEvent) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        setSidebarOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [sidebarOpen])
+
+  const closeSidebar = () => setSidebarOpen(false)
+
   if (needsSetup === null) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh' }}>
@@ -43,49 +59,78 @@ function AppShell() {
   }
 
   return (
-    <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
-      {/* Sidebar */}
-      <aside className="sidebar" style={{
-        width: 220, flexShrink: 0,
-        background: 'var(--surface)', borderRight: '1px solid var(--border)',
-        display: 'flex', flexDirection: 'column', padding: '0 8px',
+    <div style={{ display:'flex', flexDirection:'column', height:'100vh', overflow:'hidden' }}>
+      {/* Header */}
+      <header style={{
+        height: 56, flexShrink: 0,
+        background: 'var(--surface)', borderBottom: '1px solid var(--border)',
+        display: 'flex', alignItems: 'center',
+        padding: '0 16px', gap: 12,
+        zIndex: 100,
       }}>
-        {/* Brand */}
-        <div style={{ padding: '20px 8px 16px', borderBottom: '1px solid var(--border)', marginBottom: 8 }}>
-          <span style={{ fontSize: 20, fontWeight: 700 }} className="brand-glow">🧪 Gru's Lab</span>
-        </div>
-        {/* Nav */}
-        <nav style={{ flex: 1, display:'flex', flexDirection:'column', gap:2 }}>
-          <NavLink to="/"        className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')} end><LayoutDashboard size={16}/>Dashboard</NavLink>
-          <NavLink to="/plugins" className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Plug size={16}/>Plugins</NavLink>
-          <NavLink to="/boards"  className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Columns3 size={16}/>Boards</NavLink>
-          <NavLink to="/sessions"className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
-        </nav>
-        {/* Bottom */}
-        <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
-          <NavLink to="/settings" className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Settings size={16}/>Settings</NavLink>
-        </div>
-      </aside>
+        <button
+          className="btn btn-ghost"
+          onClick={() => setSidebarOpen(o => !o)}
+          title="Menu"
+          style={{ padding:'6px 8px' }}
+        >
+          <Menu size={18}/>
+        </button>
+        <span style={{ fontSize: 18, fontWeight: 700, flex: 1 }} className="brand-glow">🧪 Gru's Lab</span>
+        <button className="btn btn-ghost" onClick={toggle} title="Toggle theme" style={{ padding:'6px 8px' }}>
+          {theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}
+        </button>
+        <NavLink to="/settings" title="Settings" style={{ color:'var(--muted)', display:'flex', alignItems:'center', padding:'6px 4px' }}>
+          <Settings size={18}/>
+        </NavLink>
+      </header>
 
-      {/* Main */}
-      <div style={{ flex: 1, display:'flex', flexDirection:'column', overflow:'hidden' }}>
-        {/* Header */}
-        <header style={{
-          height: 56, flexShrink: 0,
-          background: 'var(--surface)', borderBottom: '1px solid var(--border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
-          padding: '0 24px', gap: 12,
+      <div style={{ flex: 1, position:'relative', overflow:'hidden' }}>
+        {/* Backdrop */}
+        {sidebarOpen && (
+          <div
+            onClick={closeSidebar}
+            style={{
+              position:'absolute', inset:0,
+              background:'rgba(0,0,0,0.45)',
+              zIndex: 49,
+              backdropFilter: 'blur(2px)',
+            }}
+          />
+        )}
+
+        {/* Slide-out sidebar */}
+        <aside ref={sidebarRef} style={{
+          position: 'absolute', top: 0, left: 0, bottom: 0,
+          width: 220, zIndex: 50,
+          background: 'var(--surface)', borderRight: '1px solid var(--border)',
+          display: 'flex', flexDirection: 'column', padding: '0 8px',
+          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.22s cubic-bezier(0.4,0,0.2,1)',
+          boxShadow: sidebarOpen ? '4px 0 24px rgba(0,0,0,0.3)' : 'none',
         }}>
-          <button className="btn btn-ghost" onClick={toggle} title="Toggle theme" style={{ padding:'4px 8px' }}>
-            {theme === 'dark' ? <Sun size={16}/> : <Moon size={16}/>}
-          </button>
-          <NavLink to="/settings" title="Settings" style={{ color:'var(--muted)', display:'flex', alignItems:'center' }}>
-            <Settings size={18}/>
-          </NavLink>
-        </header>
+          {/* Sidebar header */}
+          <div style={{ padding: '14px 8px 12px', borderBottom: '1px solid var(--border)', marginBottom: 8, display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color:'var(--muted)' }}>Navigation</span>
+            <button className="btn btn-ghost" onClick={closeSidebar} style={{ padding:'2px 4px' }}>
+              <X size={16}/>
+            </button>
+          </div>
+          {/* Nav */}
+          <nav style={{ flex: 1, display:'flex', flexDirection:'column', gap:2 }}>
+            <NavLink to="/"         onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')} end><LayoutDashboard size={16}/>Dashboard</NavLink>
+            <NavLink to="/plugins"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Plug size={16}/>Plugins</NavLink>
+            <NavLink to="/boards"   onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Columns3 size={16}/>Boards</NavLink>
+            <NavLink to="/sessions" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
+          </nav>
+          {/* Bottom */}
+          <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
+            <NavLink to="/settings" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Settings size={16}/>Settings</NavLink>
+          </div>
+        </aside>
 
         {/* Page content */}
-        <main style={{ flex:1, overflow:'auto', padding:24, maxWidth:1200, margin:'0 auto', width:'100%' }}>
+        <main style={{ height:'100%', overflow:'auto', padding:24, maxWidth:1200, margin:'0 auto', width:'100%', boxSizing:'border-box' }}>
           <Routes>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/plugins"  element={<Plugins />} />
