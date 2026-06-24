@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+#
+# gru-server — entry point for Gru's Lab web server mode.
+#
+# Usage:
+#   ./gru-server start   [--host HOST] [--port PORT] [--data-dir PATH] [--reload]
+#   ./gru-server stop
+#   ./gru-server status
+#   ./gru-server import --config PATH
+#
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PID_FILE="${GRU_DATA_DIR:-$HOME/.gru}/server.pid"
+
+_start() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "gru-server is already running (PID $(cat "$PID_FILE"))"
+        echo "  Dashboard → http://localhost:${PORT:-9400}"
+        return 0
+    fi
+
+    echo "🧪 Starting Gru's Lab server…"
+    python3 -m server "$@" &
+    local pid=$!
+    echo "$pid" > "$PID_FILE"
+    sleep 1
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "✓ gru-server started (PID $pid)"
+        echo "  Dashboard → http://localhost:${PORT:-9400}"
+    else
+        echo "✗ gru-server failed to start — check output above"
+        rm -f "$PID_FILE"
+        return 1
+    fi
+}
+
+_stop() {
+    if [ ! -f "$PID_FILE" ]; then
+        echo "gru-server is not running"
+        return 0
+    fi
+    local pid
+    pid=$(cat "$PID_FILE")
+    if kill -0 "$pid" 2>/dev/null; then
+        kill "$pid"
+        rm -f "$PID_FILE"
+        echo "✓ gru-server stopped (PID $pid)"
+    else
+        echo "gru-server was not running (stale PID file)"
+        rm -f "$PID_FILE"
+    fi
+}
+
+_status() {
+    if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+        echo "🟢 gru-server running (PID $(cat "$PID_FILE"))"
+        echo "   Dashboard → http://localhost:${PORT:-9400}"
+    else
+        echo "⚫ gru-server not running"
+        [ -f "$PID_FILE" ] && rm -f "$PID_FILE"
+    fi
+}
+
+_import() {
+    local config_path=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --config) config_path="$2"; shift 2 ;;
+            *) shift ;;
+        esac
+    done
+    if [ -z "$config_path" ]; then
+        echo "Usage: gru-server import --config PATH/TO/.gru/config.yml"
+        exit 1
+    fi
+    echo "📥 Importing config from $config_path…"
+    python3 - "$config_path" <<'PYEOF'
+import sys, yaml, json, urllib.request, urllib.error
+
+config_path = sys.argv[1]
+with open(config_path) as f:
+    raw = f.read()
+
+req = urllib.request.Request(
+    "http://localhost:9400/api/settings/import",
+    data=json.dumps({"yaml": raw}).encode(),
+    headers={"Content-Type": "application/json"},
+    method="POST",
+)
+try:
+    with urllib.request.urlopen(req) as resp:
+        result = json.loads(resp.read())
+        print(f"✓ {result['message']}")
+except urllib.error.URLError as e:
+    print(f"✗ Failed to reach server: {e}")
+    print("  Start the server first: ./gru-server start")
+    sys.exit(1)
+PYEOF
+}
+
+# ── Dispatch ──────────────────────────────────────────────────────────────────
+
+cd "$SCRIPT_DIR"
+
+SUBCMD="${1:-help}"
+shift 2>/dev/null || true
+
+case "$SUBCMD" in
+    start)  _start "$@" ;;
+    stop)   _stop ;;
+    status) _status ;;
+    import) _import "$@" ;;
+    dev)
+        echo "🧪 Starting Gru's Lab in dev mode (auto-reload)…"
+        python3 -m server --reload "$@"
+        ;;
+    help|--help|-h)
+        echo "Usage: gru-server {start|stop|status|import|dev} [options]"
+        echo ""
+        echo "  start  [--host H] [--port P] [--data-dir D]  Start server in background"
+        echo "  stop                                          Stop background server"
+        echo "  status                                        Check server status"
+        echo "  import --config PATH                          Import .gru/config.yml"
+        echo "  dev    [--port P]                             Start with auto-reload (dev)"
+        ;;
+    *)
+        echo "Unknown command: $SUBCMD"
+        echo "Run: gru-server help"
+        exit 1
+        ;;
+esac
