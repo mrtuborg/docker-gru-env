@@ -1176,14 +1176,15 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
   if [[ $ISSUE_EXIT -eq 0 ]]; then
     # Query the specific issue's project status directly — avoids scanning all board
     # items and is immune to the >100-item pagination problem.
-    local _issue_owner _issue_repo_name
+    # Match on PROJECT_ID (globally unique) not project.number (only owner-scoped).
+    # projectItems(first:100): issues rarely belong to >100 projects; no pagination needed.
     _issue_owner="${ISSUE_REPO%%/*}"
     _issue_repo_name="${ISSUE_REPO##*/}"
     _stage_after=$(GH_HOST="$GH_HOST" gh api graphql -f query="
     { repository(owner:\"${_issue_owner}\", name:\"${_issue_repo_name}\") {
         issue(number:${ISSUE_NUM}) {
-          projectItems(first:10) { nodes {
-            project { number }
+          projectItems(first:100) { nodes {
+            project { id }
             fieldValues(first:10) { nodes {
               ... on ProjectV2ItemFieldSingleSelectValue {
                 name field { ... on ProjectV2SingleSelectField { name } }
@@ -1194,7 +1195,7 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
       }
     }" 2>/dev/null \
     | jq -r ".data.repository.issue.projectItems.nodes[]
-        | select(.project.number==$PROJECT_NUM)
+        | select(.project.id==\"${PROJECT_ID}\")
         | .fieldValues.nodes[] | select(.field.name==\"Status\") | .name" \
     2>/dev/null | head -1 || echo "")
     if [[ -n "$_stage_after" && "$_stage_after" == "$ISSUE_STAGE" ]]; then
