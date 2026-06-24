@@ -668,24 +668,40 @@ fi
 # Sorted by: stage priority (rightmost in STAGE_ORDER first), then issue number.
 # ---------------------------------------------------------------------------
 _query_board() {
-  local raw
-  raw=$(GH_HOST="$GH_HOST" gh api graphql -f query="
-  { ${_matched_entity}(login:\"$ORG\") { projectV2(number:$PROJECT_NUM) { items(first:100) {
-    nodes {
-      content { ... on Issue { number title state repository { nameWithOwner }
-                               labels(first:10) { nodes { name } } } }
-      fieldValues(first:10) { nodes {
-        ... on ProjectV2ItemFieldSingleSelectValue {
-          name field { ... on ProjectV2SingleSelectField { name } }
-        }
-      }}
-    }
-  } } } }" 2>/dev/null) || { echo "" ; return; }
+  # Paginate through all board items (boards with >100 items would otherwise
+  # silently drop the last page, hiding issues in stages like Analysis).
+  local all_nodes="[]"
+  local cursor="" has_next="true"
+  while [[ "$has_next" == "true" ]]; do
+    local after_clause=""
+    [[ -n "$cursor" ]] && after_clause=", after: \\\"$cursor\\\""
+    local page
+    page=$(GH_HOST="$GH_HOST" gh api graphql -f query="
+    { ${_matched_entity}(login:\"$ORG\") { projectV2(number:$PROJECT_NUM) { items(first:100${after_clause}) {
+      pageInfo { hasNextPage endCursor }
+      nodes {
+        content { ... on Issue { number title state repository { nameWithOwner }
+                                 labels(first:10) { nodes { name } } } }
+        fieldValues(first:10) { nodes {
+          ... on ProjectV2ItemFieldSingleSelectValue {
+            name field { ... on ProjectV2SingleSelectField { name } }
+          }
+        }}
+      }
+    } } } }" 2>/dev/null) || { echo "" ; return; }
+
+    has_next=$(echo "$page" | jq -r ".data.${_matched_entity}.projectV2.items.pageInfo.hasNextPage" 2>/dev/null)
+    cursor=$(echo "$page"   | jq -r ".data.${_matched_entity}.projectV2.items.pageInfo.endCursor"  2>/dev/null)
+    all_nodes=$(printf '%s\n%s' "$all_nodes" "$page" \
+      | jq -s ".[0] + [.[1].data.${_matched_entity}.projectV2.items.nodes[]]" 2>/dev/null)
+  done
+
+  local raw="$all_nodes"
 
   # Build priority map from STAGE_ORDER (rightmost = highest priority = lowest sort key)
   # Then emit: <priority> <number> <repo> <stage>  sorted ascending, strip priority column
   # Issues carrying 'watcher-lock' are skipped — another container is processing them.
-  echo "$raw" | jq -r "[.data.${_matched_entity}.projectV2.items.nodes[]
+  echo "$raw" | jq -r "[.[]
     | select(.content.state==\"OPEN\")
     | select((.content.labels.nodes // []) | map(.name) | index(\"watcher-lock\") | not)
     | { number: .content.number, title: .content.title,
@@ -1158,20 +1174,27 @@ The pipeline agent session exceeded ${_SESSION_TIMEOUT_HOURS}h and was killed.
   # in, the agent likely failed silently (zero exit but no real work done). Log a
   # clear warning so the human can diagnose without waiting for the retry cap.
   if [[ $ISSUE_EXIT -eq 0 ]]; then
+    # Query the specific issue's project status directly — avoids scanning all board
+    # items and is immune to the >100-item pagination problem.
+    local _issue_owner _issue_repo_name
+    _issue_owner="${ISSUE_REPO%%/*}"
+    _issue_repo_name="${ISSUE_REPO##*/}"
     _stage_after=$(GH_HOST="$GH_HOST" gh api graphql -f query="
-    { ${_matched_entity}(login:\"$ORG\") { projectV2(number:$PROJECT_NUM) { items(first:100) {
-      nodes {
-        content { ... on Issue { number repository { nameWithOwner } } }
-        fieldValues(first:10) { nodes {
-          ... on ProjectV2ItemFieldSingleSelectValue {
-            name field { ... on ProjectV2SingleSelectField { name } }
-          }
-        }}
+    { repository(owner:\"${_issue_owner}\", name:\"${_issue_repo_name}\") {
+        issue(number:${ISSUE_NUM}) {
+          projectItems(first:10) { nodes {
+            project { number }
+            fieldValues(first:10) { nodes {
+              ... on ProjectV2ItemFieldSingleSelectValue {
+                name field { ... on ProjectV2SingleSelectField { name } }
+              }
+            }}
+          }}
+        }
       }
-    } } } }" 2>/dev/null \
-    | jq -r ".data.${_matched_entity}.projectV2.items.nodes[]
-        | select(.content.number==$ISSUE_NUM
-              and .content.repository.nameWithOwner==\"$ISSUE_REPO\")
+    }" 2>/dev/null \
+    | jq -r ".data.repository.issue.projectItems.nodes[]
+        | select(.project.number==$PROJECT_NUM)
         | .fieldValues.nodes[] | select(.field.name==\"Status\") | .name" \
     2>/dev/null | head -1 || echo "")
     if [[ -n "$_stage_after" && "$_stage_after" == "$ISSUE_STAGE" ]]; then
