@@ -237,7 +237,7 @@ gh-watch() {
             echo "✅ Watcher started"
             local host_config=""
             [ -n "${dir_config_flag}" ] && host_config="${ws}/${dir_config_flag}/config.yml"
-            _logui_start "${cname}" "${port}" "${cname}" "${host_config}"
+            _logui_start "${cname}" "${port}" "${cname}" "${host_config}" "${_log_dir}"
             ;;
 
         stop)

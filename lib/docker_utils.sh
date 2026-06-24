@@ -385,7 +385,7 @@ _cw_dock_bg() {
 #
 #   _logui_pid_file  <name>   → /tmp path for the python PID
 #   _logui_port_file <name>   → /tmp path for the port number
-#   _logui_start     <name> <port> <container> [config_path]
+#   _logui_start     <name> <port> <container> [config_path] [log_dir]
 #   _logui_stop      <name>
 #   _logui_status    <name>
 # ---------------------------------------------------------------------------
@@ -394,7 +394,7 @@ _logui_pid_file()  { echo "/tmp/gru-logui-${1}.pid"; }
 _logui_port_file() { echo "/tmp/gru-logui-${1}.port"; }
 
 _logui_start() {
-    local name="$1" port="$2" container="$3" config_path="${4:-}"
+    local name="$1" port="$2" container="$3" config_path="${4:-}" log_dir="${5:-}"
     local log_ui_script="${SCRIPT_DIR}/docker/scripts/watch-log-ui.py"
     if [ ! -f "${log_ui_script}" ]; then
         echo "⚠️  Dashboard script not found: ${log_ui_script}" >&2
@@ -424,6 +424,7 @@ PORTEOF
 
     local -a ui_args=("${container}" "${actual_port}")
     [ -n "${config_path}" ] && ui_args+=(--config "${config_path}")
+    [ -n "${log_dir}" ] && ui_args+=(--log-dir "${log_dir}")
     python3 "${log_ui_script}" "${ui_args[@]}" &
     local _ui_pid=$!
     echo "${_ui_pid}"     > "$(_logui_pid_file "${name}")"

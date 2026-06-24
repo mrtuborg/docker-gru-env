@@ -227,8 +227,9 @@ class LogBuffer:
     # Timestamp in session start/done lines: "(Mon Jun 15 08:01:43 UTC 2026)"
     LOG_TS = re.compile(r'\((\w{3} \w{3}\s+\d+ \d{2}:\d{2}:\d{2} \w+ \d{4})\)')
 
-    def __init__(self, container):
+    def __init__(self, container, log_dir=None):
         self.container    = container
+        self._log_dir     = log_dir or '/logs'
         self._lines       = deque(maxlen=2000)
         self._events      = deque(maxlen=100)  # significant watcher lines only
         self._run_start   = time.time()         # ignore tail-replayed lines older than this
@@ -256,21 +257,22 @@ class LogBuffer:
             return None
 
     def _backfill_from_logs(self, container):
-        """Parse /logs/run-*.log inside the container to hydrate _active with any
-        in-progress issue. Completed issues are NOT backfilled into _done — the
-        dashboard section is titled "Completed This Run" and must only show
-        completions from the current watcher session."""
+        """Parse run-*.log files inside the container to hydrate _active (any
+        in-progress issue) and _events (significant watcher lines).  Completed
+        issues are NOT backfilled into _done — that section only shows completions
+        from the current watcher session."""
         try:
             result = subprocess.run(
                 ['docker', 'exec', container, 'sh', '-c',
-                 'ls /logs/run-*.log 2>/dev/null | sort'],
+                 f'ls {self._log_dir}/run-*.log 2>/dev/null | sort'],
                 capture_output=True, text=True, timeout=5
             )
             log_files = result.stdout.strip().split('\n') if result.stdout.strip() else []
         except Exception:
             return
 
-        pending = {}   # num -> {stage, started_epoch}
+        pending = {}    # num -> {stage, started_epoch, started_str}
+        backfill_events = []  # (epoch_or_0, ts_str, line)
 
         for log_file in log_files:
             if not log_file:
@@ -285,26 +287,35 @@ class LogBuffer:
                     if ms:
                         num, stage = int(ms.group(1)), ms.group(2)
                         epoch = self._parse_log_ts(line)
-                        pending[num] = {'stage': stage, 'started_epoch': epoch}
+                        # Extract HH:MM:SS for display
+                        ts_m = re.search(r'\((\w+ \w+ +\d+ (\d{2}:\d{2}:\d{2}))', line)
+                        ts_str = ts_m.group(2) if ts_m else ''
+                        pending[num] = {'stage': stage, 'started_epoch': epoch, 'started': ts_str}
                     md = self.ISSUE_DONE.search(line)
                     if md:
                         num = int(md.group(1))
                         pending.pop(num, None)
+                    if self.SIGNIFICANT.search(line):
+                        epoch = self._parse_log_ts(line) or 0
+                        ts_m = re.search(r'(\d{2}:\d{2}:\d{2})', line)
+                        ts_str = ts_m.group(1) if ts_m else ''
+                        backfill_events.append((epoch, ts_str, line))
             except Exception:
                 continue
 
-        # Restore _active for any issue that started but never completed
-        # (e.g. dashboard restarted mid-run)
-        if pending:
-            num, info = next(reversed(pending.items()))
-            with self._lock:
-                if self._active is None:
-                    self._active = {
-                        'num': num,
-                        'stage': info.get('stage', ''),
-                        'started': '',
-                        'started_epoch': info.get('started_epoch', time.time()),
-                    }
+        with self._lock:
+            # Restore _active for any issue that started but never completed
+            if pending and self._active is None:
+                num, info = next(reversed(pending.items()))
+                self._active = {
+                    'num': num,
+                    'stage': info.get('stage', ''),
+                    'started': info.get('started', ''),
+                    'started_epoch': info.get('started_epoch', time.time()),
+                }
+            # Seed _events with backfilled significant lines (most recent 100)
+            for _epoch, ts_str, line in backfill_events[-100:]:
+                self._events.append({'t': ts_str, 'line': line})
 
     def _stream(self):
         while True:
@@ -1430,12 +1441,15 @@ def main():
     port      = int(args[1])
     config_path = None
     device_status_path = None
+    log_dir = None
     i = 2
     while i < len(args):
         if args[i] == '--config' and i + 1 < len(args):
             config_path = args[i + 1]; i += 2
         elif args[i] == '--device-status' and i + 1 < len(args):
             device_status_path = args[i + 1]; i += 2
+        elif args[i] == '--log-dir' and i + 1 < len(args):
+            log_dir = args[i + 1]; i += 2
         else:
             i += 1
 
@@ -1444,7 +1458,7 @@ def main():
         device_status_path = cfg['device_status_file']
 
     board = BoardCache(cfg)
-    logs  = LogBuffer(container)
+    logs  = LogBuffer(container, log_dir=log_dir)
 
     class _Handler(Handler):
         pass
