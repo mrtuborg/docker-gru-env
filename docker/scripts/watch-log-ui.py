@@ -71,12 +71,13 @@ def load_config(path):
 # Board cache — polls GitHub project via gh CLI every 30 s
 # ---------------------------------------------------------------------------
 
-GQL_BOARD = """
-query GetBoard($org: String!, $num: Int!) {
+GQL_BOARD_PAGE = """
+query GetBoardPage($org: String!, $num: Int!, $cursor: String) {
   organization(login: $org) {
     projectV2(number: $num) {
       title
-      items(first: 100) {
+      items(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           fieldValueByName(name: "Status") {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
@@ -95,7 +96,8 @@ query GetBoard($org: String!, $num: Int!) {
   user(login: $org) {
     projectV2(number: $num) {
       title
-      items(first: 100) {
+      items(first: 100, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           fieldValueByName(name: "Status") {
             ... on ProjectV2ItemFieldSingleSelectValue { name }
@@ -131,24 +133,49 @@ class BoardCache:
         env = dict(os.environ)
         if cfg.get('gh_host'):
             env['GH_HOST'] = cfg['gh_host']
+
+        all_nodes = []
+        title = ''
+        entity = None   # 'organization' or 'user', resolved on first page
+        cursor = None
+        first_parsed = None
+
         try:
-            result = subprocess.run(
-                ['gh', 'api', 'graphql',
-                 '-F', f'org={cfg["project_owner"]}',
-                 '-F', f'num={cfg["project_number"]}',
-                 '-f', f'query={GQL_BOARD}'],
-                capture_output=True, text=True, timeout=20, env=env
-            )
-            # gh exits non-zero when one alias (organization vs user) resolves
-            # but the other doesn't — try to parse JSON regardless of exit code.
-            try:
-                parsed = json.loads(result.stdout)
-            except (json.JSONDecodeError, ValueError):
-                return {'error': result.stderr.strip() or 'gh api failed'}
-            # If no data at all, surface the gh error
-            if not parsed.get('data'):
-                return {'error': result.stderr.strip() or parsed.get('errors', [{}])[0].get('message', 'gh api failed')}
-            return parsed
+            while True:
+                args = [
+                    'gh', 'api', 'graphql',
+                    '-F', f'org={cfg["project_owner"]}',
+                    '-F', f'num={cfg["project_number"]}',
+                    '-f', f'query={GQL_BOARD_PAGE}',
+                ]
+                if cursor:
+                    args += ['-F', f'cursor={cursor}']
+                # omit cursor entirely on first page → GraphQL variable defaults to null
+                result = subprocess.run(args, capture_output=True, text=True, timeout=20, env=env)
+                try:
+                    parsed = json.loads(result.stdout)
+                except (json.JSONDecodeError, ValueError):
+                    return {'error': result.stderr.strip() or 'gh api failed'}
+                if first_parsed is None:
+                    first_parsed = parsed
+                if not parsed.get('data'):
+                    return {'error': result.stderr.strip() or parsed.get('errors', [{}])[0].get('message', 'gh api failed')}
+
+                gdata = parsed['data']
+                if entity is None:
+                    entity = 'organization' if (gdata.get('organization') or {}).get('projectV2') else 'user'
+                project = (gdata.get(entity) or {}).get('projectV2') or {}
+                if not title:
+                    title = project.get('title', '')
+                items_page = project.get('items', {})
+                all_nodes.extend(items_page.get('nodes', []))
+                page_info = items_page.get('pageInfo', {})
+                if not page_info.get('hasNextPage'):
+                    break
+                cursor = page_info.get('endCursor')
+
+            # Return in original shape so _board() parser works unchanged
+            return {'data': {entity: {'projectV2': {'title': title, 'items': {'nodes': all_nodes}}}}}
         except Exception as e:
             return {'error': str(e)}
 
