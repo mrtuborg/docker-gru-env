@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  gru-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: gru-server
+    restart: unless-stopped
+    ports:
+      - "${GRU_PORT:-9400}:9400"
+    volumes:
+      - gru-data:/data
+      # Optional: expose Docker socket so Copilot plugin can manage containers
+      # - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      GRU_DATA_DIR: /data
+      GRU_PORT: 9400
+      # GitHub OAuth App credentials (register at https://github.com/settings/developers)
+      # GRU_GITHUB_CLIENT_ID: ""
+      # For GitHub Enterprise: GRU_GITHUB_<HOST_UPPER>_CLIENT_ID: ""
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:9400/api/wizard/status"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  gru-data:
+    driver: local

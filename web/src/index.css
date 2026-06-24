@@ -53,10 +53,15 @@ code{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;font-size:.85em;}
 .badge-error{background:#2b0d0d;border-color:#6e2020;color:#f47067;}
 .badge-info{background:#0d2044;border-color:#1f4070;color:#79c0ff;}
 .badge-unknown{background:#1c1c1c;border-color:#333;color:#636e7b;}
+.badge-green{background:#0d2b1a;border-color:#196130;color:#3fb950;}
+.badge-red{background:#2b0d0d;border-color:#6e2020;color:#f47067;}
 [data-theme="light"] .badge-healthy{background:#dafbe1;border-color:#34d058;color:#1a7f37;}
 [data-theme="light"] .badge-degraded{background:#fff8c5;border-color:#d4a72c;color:#9a6700;}
 [data-theme="light"] .badge-error{background:#ffebe9;border-color:#ff8182;color:#d1242f;}
 [data-theme="light"] .badge-info{background:#ddf4ff;border-color:#54aeff;color:#0969da;}
+[data-theme="light"] .badge-green{background:#dafbe1;border-color:#34d058;color:#1a7f37;}
+[data-theme="light"] .badge-red{background:#ffebe9;border-color:#ff8182;color:#d1242f;}
+.spin{animation:spin .8s linear infinite;}
 .dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;display:inline-block;}
 .dot-green{background:var(--green);box-shadow:0 0 6px var(--green);}
 .dot-yellow{background:var(--yellow);box-shadow:0 0 6px var(--yellow);}
