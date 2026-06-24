@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Plugins from './pages/Plugins'
 import Boards from './pages/Boards'
+import Pipelines from './pages/Pipelines'
+import PipelineEditor from './pages/PipelineEditor'
 import SessionsPage from './pages/Sessions'
 import SettingsPage from './pages/Settings'
 import Wizard from './pages/Wizard'
@@ -120,8 +122,9 @@ function AppShell() {
           <nav style={{ flex: 1, display:'flex', flexDirection:'column', gap:2 }}>
             <NavLink to="/"         onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')} end><LayoutDashboard size={16}/>Dashboard</NavLink>
             <NavLink to="/plugins"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Plug size={16}/>Plugins</NavLink>
-            <NavLink to="/boards"   onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Columns3 size={16}/>Boards</NavLink>
-            <NavLink to="/sessions" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
+            <NavLink to="/boards"     onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Columns3 size={16}/>Boards</NavLink>
+            <NavLink to="/pipelines" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Workflow size={16}/>Pipelines</NavLink>
+            <NavLink to="/sessions"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
           </nav>
           {/* Bottom */}
           <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
@@ -134,8 +137,10 @@ function AppShell() {
           <Routes>
             <Route path="/"         element={<Dashboard />} />
             <Route path="/plugins"  element={<Plugins />} />
-            <Route path="/boards"   element={<Boards />} />
-            <Route path="/sessions" element={<SessionsPage />} />
+            <Route path="/boards"        element={<Boards />} />
+            <Route path="/pipelines"     element={<Pipelines />} />
+            <Route path="/pipelines/:id" element={<PipelineEditor />} />
+            <Route path="/sessions"      element={<SessionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/wizard"   element={<Wizard onComplete={() => { setNeedsSetup(false); navigate('/') }} />} />
           </Routes>
