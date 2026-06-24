@@ -130,8 +130,9 @@ export default function Pipelines() {
                 >
                   {p.enabled ? <><Pause size={12}/> Pause</> : <><Play size={12}/> Start</>}
                 </button>
-                <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:12 }}>
-                  <FileText size={12}/> Logs
+                <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:12 }}
+                  onClick={() => navigate(`/pipelines/${p.id}/runs`)}>
+                  <FileText size={12}/> Runs
                 </button>
               </div>
             </div>

@@ -1,12 +1,16 @@
 """Pipelines router — CRUD, control, runs, board introspection."""
 from __future__ import annotations
 
+import os
+import re
 import uuid
-from typing import Any
+from pathlib import Path
+from typing import Any, Optional
 
 import httpx
+import yaml
 from fastapi import APIRouter, HTTPException, Request
-from sse_starlette.sse import EventSourceResponse
+from pydantic import BaseModel
 
 from ..config import (
     get_pipeline, list_pipelines, upsert_pipeline, delete_pipeline,
@@ -33,6 +37,103 @@ async def create(body: PipelineCreate):
         raise HTTPException(409, f"Pipeline '{body.id}' already exists")
     await upsert_pipeline(body.model_dump())
     return await get_pipeline(body.id)
+
+
+# ── Import from config.yml ───────────────────────────────────────────────────
+
+class ImportRequest(BaseModel):
+    config_yaml: str
+    prompts_dir: Optional[str] = None
+    pipeline_id: Optional[str] = None
+
+
+@router.post("/import", status_code=201)
+async def import_pipeline(body: ImportRequest):
+    """Import a pipeline from an existing watcher config.yml + stage-prompts/."""
+    try:
+        cfg = yaml.safe_load(body.config_yaml)
+    except Exception as e:
+        raise HTTPException(400, f"Invalid YAML: {e}")
+
+    if not cfg or not isinstance(cfg, dict):
+        raise HTTPException(400, "Config must be a YAML mapping")
+
+    # Extract pipeline identity
+    pid = body.pipeline_id or cfg.get("name", "imported-" + uuid.uuid4().hex[:6])
+    pid = re.sub(r'[^a-z0-9-]', '-', pid.lower().strip())
+
+    existing = await get_pipeline(pid)
+    if existing:
+        raise HTTPException(409, f"Pipeline '{pid}' already exists")
+
+    # Build stages from stage_order
+    stage_order = cfg.get("stage_order", [])
+    queue_stages = set(cfg.get("queue_stages", []))
+    prompts_dir = Path(body.prompts_dir) if body.prompts_dir else None
+
+    stages = []
+    # Collect all known columns: stage_order columns are AI, others are human
+    for col_name in stage_order:
+        prompt = ""
+        if prompts_dir:
+            # Try exact match, then with spaces replaced
+            for candidate in [col_name, col_name.replace(" ", "_")]:
+                prompt_file = prompts_dir / f"{candidate}.md"
+                if prompt_file.exists():
+                    prompt = prompt_file.read_text()
+                    break
+        stages.append({
+            "column": col_name,
+            "actor": "ai",
+            "prompt": prompt,
+        })
+
+    # Add human gate stages that aren't in stage_order but are common
+    for human_col in ["Backlog", "Review", "Done"]:
+        if human_col not in stage_order and human_col not in [s["column"] for s in stages]:
+            stages.append({"column": human_col, "actor": "human"})
+
+    # Build models list
+    models = []
+    if cfg.get("models"):
+        for m in cfg["models"]:
+            if isinstance(m, dict):
+                models.append({"model": m.get("model", ""), "priority": m.get("priority", 1)})
+            elif isinstance(m, str):
+                models.append({"model": m, "priority": len(models) + 1})
+    elif cfg.get("model"):
+        models.append({"model": cfg["model"], "priority": 1})
+
+    # Build findings board
+    findings = None
+    fp = cfg.get("findings_project", {})
+    if fp and isinstance(fp, dict):
+        findings = {
+            "project_owner": fp.get("project_owner", cfg.get("project_owner", "")),
+            "project_number": fp.get("project_number", 0),
+            "initial_status": fp.get("initial_status", "Analysis"),
+        }
+
+    pipeline_data = {
+        "id": pid,
+        "name": cfg.get("name", pid),
+        "enabled": False,  # Don't auto-start imported pipelines
+        "plugin_id": cfg.get("plugin_id", "github-sensio"),
+        "board_type": "github",
+        "project_owner": cfg.get("project_owner", ""),
+        "project_number": cfg.get("project_number", 0),
+        "stages": stages,
+        "poll_interval": cfg.get("poll_interval", 300),
+        "max_issues": cfg.get("max_issues", 50),
+        "max_retries": cfg.get("max_per_issue", 3),
+        "session_timeout_hours": cfg.get("session_timeout_hours", 4.0),
+        "models": models,
+        "allowed_repos": cfg.get("allowed_repos", []),
+        "findings": findings,
+    }
+
+    await upsert_pipeline(pipeline_data)
+    return await get_pipeline(pid)
 
 
 @router.get("/{pipeline_id}")
