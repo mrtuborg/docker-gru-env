@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Save, Upload, Download, Loader2, AlertTriangle } from 'lucide-react'
+import PluginConfigForm from '../components/PluginConfigForm'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -8,11 +9,33 @@ export default function SettingsPage() {
   const [importYaml, setImportYaml] = useState('')
   const [importing, setImporting] = useState(false)
   const [importMsg, setImportMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [dockerConfig, setDockerConfig] = useState<Record<string, any>>({})
+  const [dockerSaving, setDockerSaving] = useState(false)
+  const [dockerMsg, setDockerMsg] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).then(setSettings).catch(() => {})
+    fetch('/api/settings').then(r => r.json()).then(d => {
+      setSettings(d)
+      // Extract docker settings from stored settings
+      setDockerConfig({
+        cw_image: d.cw_image || 'gru:local',
+        cw_data_volume: d.cw_data_volume || 'gru-data',
+        cw_logs_volume: d.cw_logs_volume || 'gru-logs',
+        cw_instruct_volume: d.cw_instruct_volume || 'gru-instructions',
+        cw_ssh_path: d.cw_ssh_path || '~/.ssh',
+      })
+    }).catch(() => {})
   }, [])
+
+  const saveDockerSettings = async () => {
+    setDockerSaving(true); setDockerMsg(null)
+    try {
+      await fetch('/api/settings', { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ...settings, ...dockerConfig }) })
+      setDockerMsg('Saved ✓'); setTimeout(() => setDockerMsg(null), 2500)
+    } catch { setDockerMsg('Error saving') }
+    finally { setDockerSaving(false) }
+  }
 
   const saveSettings = async () => {
     setSaving(true); setSaveMsg(null)
@@ -128,6 +151,21 @@ export default function SettingsPage() {
         <button className="btn btn-primary" style={{ marginTop:12 }} onClick={importFromYaml} disabled={!importYaml.trim() || importing}>
           {importing ? <><Loader2 size={13} className="spin"/>Importing…</> : <><Upload size={13}/>Import</>}
         </button>
+      </section>
+
+      {/* Docker infrastructure */}
+      <section className="card" style={{ marginBottom:20 }}>
+        <div className="section-label" style={{ marginBottom:4 }}>Docker Infrastructure</div>
+        <p style={{ color:'var(--muted)', fontSize:13, marginBottom:16 }}>
+          Controls how Copilot sessions are run inside Docker containers.
+        </p>
+        <PluginConfigForm pluginType="docker" initialValues={dockerConfig} onChange={setDockerConfig}/>
+        <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:16 }}>
+          <button className="btn btn-primary" onClick={saveDockerSettings} disabled={dockerSaving}>
+            {dockerSaving ? <><Loader2 size={13} className="spin"/>Saving…</> : <><Save size={13}/>Save</>}
+          </button>
+          {dockerMsg && <span style={{ fontSize:12, color: dockerMsg.startsWith('Error') ? 'var(--red)' : 'var(--green)' }}>{dockerMsg}</span>}
+        </div>
       </section>
 
       {/* Danger zone */}
