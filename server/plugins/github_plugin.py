@@ -213,13 +213,17 @@ class GitHubPlugin(GruPlugin):
                 "Register a GitHub App first via the manifest flow."
             )
 
+        client_secret = await load_secret(self.plugin_id, _APP_CLIENT_SECRET_KEY)
         host = self._config.get("host", "github.com")
         base = f"https://{host}" if host != "github.com" else "https://github.com"
+        payload = {"client_id": client_id, "scope": "repo project read:org"}
+        if client_secret:
+            payload["client_secret"] = client_secret
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{base}/login/device/code",
                 headers={"Accept": "application/json"},
-                data={"client_id": client_id, "scope": "repo project read:org"},
+                data=payload,
             )
             resp.raise_for_status()
             return resp.json()
@@ -230,17 +234,21 @@ class GitHubPlugin(GruPlugin):
         if not client_id:
             raise ValueError("No client_id — cannot poll device flow")
 
+        client_secret = await load_secret(self.plugin_id, _APP_CLIENT_SECRET_KEY)
         host = self._config.get("host", "github.com")
         base = f"https://{host}" if host != "github.com" else "https://github.com"
+        payload = {
+            "client_id":   client_id,
+            "device_code": device_code,
+            "grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
+        }
+        if client_secret:
+            payload["client_secret"] = client_secret
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{base}/login/oauth/access_token",
                 headers={"Accept": "application/json"},
-                data={
-                    "client_id":   client_id,
-                    "device_code": device_code,
-                    "grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
-                },
+                data=payload,
             )
             data = resp.json()
 
