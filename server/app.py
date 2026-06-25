@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import init_db
 from .plugin_manager import PluginManager
+from .services.pipeline_engine import PipelineEngine
 from .routers import dashboard, plugins_api, wizard, boards, sessions, settings_api, pipelines
 
 logger = logging.getLogger(__name__)
@@ -31,8 +32,10 @@ async def lifespan(app: FastAPI):
     plugin_manager = PluginManager()
     await plugin_manager.load_all()
     app.state.plugins = plugin_manager
+    app.state.engine = PipelineEngine()
     yield
     logger.info("Gru Server shutting down…")
+    await app.state.engine.stop_all()
     if plugin_manager:
         await plugin_manager.teardown_all()
 

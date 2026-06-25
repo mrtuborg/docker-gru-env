@@ -1,6 +1,8 @@
 """Pipelines router — CRUD, control, runs, board introspection."""
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import re
 import uuid
@@ -177,7 +179,11 @@ async def start_pipeline(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
-    # TODO: integrate with PipelineEngine when implemented
+    engine = request.app.state.engine
+    started = await engine.start(pipeline_id)
+    if not started:
+        return {"status": "already_running", "pipeline_id": pipeline_id}
+    await upsert_pipeline({**p, "enabled": True})
     return {"status": "started", "pipeline_id": pipeline_id}
 
 
@@ -186,6 +192,9 @@ async def stop_pipeline(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
+    engine = request.app.state.engine
+    await engine.stop(pipeline_id)
+    await upsert_pipeline({**p, "enabled": False})
     return {"status": "stopped", "pipeline_id": pipeline_id}
 
 
@@ -194,7 +203,9 @@ async def run_once(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
-    return {"status": "triggered", "pipeline_id": pipeline_id}
+    engine = request.app.state.engine
+    result = await engine.run_once(pipeline_id)
+    return {"status": "completed", "pipeline_id": pipeline_id, "result": result}
 
 
 # ── Observability ─────────────────────────────────────────────────────────────
@@ -224,6 +235,43 @@ async def get_state(pipeline_id: str):
 async def clear_state(pipeline_id: str):
     await clear_pipeline_state(pipeline_id)
     return {"cleared": True}
+
+
+@router.get("/{pipeline_id}/status")
+async def get_status(pipeline_id: str, request: Request):
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    engine = request.app.state.engine
+    return {"pipeline_id": pipeline_id, "status": engine.status(pipeline_id)}
+
+
+@router.get("/{pipeline_id}/logs")
+async def stream_logs(pipeline_id: str, request: Request):
+    """SSE stream of live pipeline log events."""
+    from sse_starlette.sse import EventSourceResponse
+    from ..services.pipeline_engine import log_bus
+
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+
+    queue = log_bus.subscribe(pipeline_id)
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=30)
+                    yield {"event": event.level, "data": json.dumps(event.to_dict())}
+                except asyncio.TimeoutError:
+                    yield {"event": "ping", "data": "{}"}
+        finally:
+            log_bus.unsubscribe(pipeline_id, queue)
+
+    return EventSourceResponse(event_generator())
 
 
 # ── Board introspection ──────────────────────────────────────────────────────

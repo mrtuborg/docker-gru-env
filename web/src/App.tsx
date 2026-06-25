@@ -7,6 +7,7 @@ import Boards from './pages/Boards'
 import Pipelines from './pages/Pipelines'
 import PipelineEditor from './pages/PipelineEditor'
 import PipelineRuns from './pages/PipelineRuns'
+import PipelineLogs from './pages/PipelineLogs'
 import SessionsPage from './pages/Sessions'
 import SettingsPage from './pages/Settings'
 import Wizard from './pages/Wizard'
@@ -142,6 +143,7 @@ function AppShell() {
             <Route path="/pipelines"     element={<Pipelines />} />
             <Route path="/pipelines/:id" element={<PipelineEditor />} />
             <Route path="/pipelines/:id/runs" element={<PipelineRuns />} />
+            <Route path="/pipelines/:id/logs" element={<PipelineLogs />} />
             <Route path="/sessions"      element={<SessionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/wizard"   element={<Wizard onComplete={() => { setNeedsSetup(false); navigate('/') }} />} />

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, Play, Pause, FileText, RefreshCw, Bot, User } from 'lucide-react'
+import { Plus, Play, Pause, FileText, RefreshCw, Bot, User, ScrollText } from 'lucide-react'
 
 interface Pipeline {
   id: string
@@ -133,6 +133,10 @@ export default function Pipelines() {
                 <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:12 }}
                   onClick={() => navigate(`/pipelines/${p.id}/runs`)}>
                   <FileText size={12}/> Runs
+                </button>
+                <button className="btn btn-secondary" style={{ padding:'5px 12px', fontSize:12 }}
+                  onClick={() => navigate(`/pipelines/${p.id}/logs`)}>
+                  <ScrollText size={12}/> Logs
                 </button>
               </div>
             </div>
