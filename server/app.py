@@ -75,8 +75,13 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     if static_dir.exists() and any(static_dir.iterdir()):
         app.mount("/assets", StaticFiles(directory=static_dir / "assets"), name="assets")
 
+        # Serve known root-level static files directly before the SPA catchall
+        _static_files = {p.name: p for p in static_dir.iterdir() if p.is_file()}
+
         @app.get("/{full_path:path}", include_in_schema=False)
         async def spa_fallback(full_path: str):
+            if full_path in _static_files:
+                return FileResponse(_static_files[full_path])
             index = static_dir / "index.html"
             return FileResponse(index)
 
