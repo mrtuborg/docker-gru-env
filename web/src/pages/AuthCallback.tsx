@@ -2,13 +2,17 @@
  * AuthCallback — handles OAuth redirect callbacks.
  *
  * After GitHub App Manifest Flow completes, GitHub redirects to:
- *   /#/auth-callback?plugin=<id>&status=app_registered&app_name=<name>
+ *   /#/auth-callback?plugin=<id>&status=app_registered&app_name=<name>&app_id=<id>&host=<host>
  *
- * This page then automatically starts the Device Flow to get a user token.
+ * Flow:
+ *   1. Show "App Created" confirmation
+ *   2. Show instructions to enable Device Flow in GitHub App settings
+ *   3. User clicks "I've enabled it" → start Device Flow
+ *   4. Done
  */
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { CheckCircle2, Loader2, AlertCircle } from 'lucide-react'
+import { CheckCircle2, AlertCircle, ExternalLink } from 'lucide-react'
 import OAuthModal from '../components/OAuthModal'
 
 export default function AuthCallback() {
@@ -18,19 +22,15 @@ export default function AuthCallback() {
   const pluginId = params.get('plugin')
   const status = params.get('status')
   const appName = params.get('app_name')
+  const host = params.get('host') || 'github.com'
   const errorMsg = params.get('message')
 
-  const [phase, setPhase] = useState<'registered' | 'device_flow' | 'done' | 'error'>(
+  const [phase, setPhase] = useState<'registered' | 'enable_device_flow' | 'device_flow' | 'done' | 'error'>(
     status === 'error' ? 'error' : 'registered'
   )
 
-  // Auto-transition: after showing "app registered" → start device flow
-  useEffect(() => {
-    if (phase === 'registered' && pluginId) {
-      const t = setTimeout(() => setPhase('device_flow'), 2000)
-      return () => clearTimeout(t)
-    }
-  }, [phase, pluginId])
+  const appSlug = (appName || 'gru-server').toLowerCase().replace(/[\s()]/g, '-').replace(/-+/g, '-')
+  const appSettingsUrl = `https://${host}/settings/apps/${appSlug}`
 
   if (!pluginId) {
     return (
@@ -47,19 +47,48 @@ export default function AuthCallback() {
 
   return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'60vh' }}>
-      <div className="modal-card" style={{ maxWidth: 480 }}>
+      <div className="modal-card" style={{ maxWidth: 520 }}>
 
         {phase === 'registered' && (
           <div style={{ textAlign:'center' }}>
             <CheckCircle2 size={48} color="var(--green)" style={{ marginBottom:16 }}/>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>GitHub App Created!</h2>
-            <p style={{ color:'var(--muted)', marginBottom:8, lineHeight:1.6 }}>
-              <strong>{appName || 'Gru Server'}</strong> has been registered successfully.
+            <p style={{ color:'var(--muted)', marginBottom:20, lineHeight:1.6 }}>
+              <strong>{appName || 'Gru Server'}</strong> has been registered on {host}.
             </p>
-            <p style={{ color:'var(--muted)', fontSize:13 }}>
-              <Loader2 size={14} className="spin" style={{ marginRight:6, verticalAlign:'middle' }}/>
-              Starting authorization…
+            <button className="btn btn-primary" onClick={() => setPhase('enable_device_flow')}>
+              Continue →
+            </button>
+          </div>
+        )}
+
+        {phase === 'enable_device_flow' && (
+          <div>
+            <h2 style={{ fontSize:18, fontWeight:700, marginBottom:16 }}>One More Step Required</h2>
+            <p style={{ color:'var(--muted)', marginBottom:12, lineHeight:1.6 }}>
+              You need to enable <strong>Device Flow</strong> in the GitHub App settings before signing in.
             </p>
+            <ol style={{ color:'var(--muted)', fontSize:14, lineHeight:2.2, paddingLeft:20, marginBottom:20 }}>
+              <li>Click the button below to open the GitHub App settings</li>
+              <li>Scroll down to <strong>"Enable Device Flow"</strong></li>
+              <li>Check the box and click <strong>"Save changes"</strong></li>
+              <li>Come back here and click <strong>"I've enabled it"</strong></li>
+            </ol>
+            <a
+              href={appSettingsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'10px 16px',
+                background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:6,
+                fontSize:13, fontWeight:500, color:'var(--text)', textDecoration:'none',
+                marginBottom:20 }}>
+              <ExternalLink size={14}/> Open GitHub App Settings
+            </a>
+            <div>
+              <button className="btn btn-primary" onClick={() => setPhase('device_flow')} style={{ width:'100%' }}>
+                ✓ I've enabled Device Flow — Sign In
+              </button>
+            </div>
           </div>
         )}
 

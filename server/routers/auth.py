@@ -50,9 +50,12 @@ async def manifest_callback(code: str, state: str, request: Request):
             f"&message={str(exc)}"
         )
 
-    # Success — redirect to UI which will start the device flow
+    # Success — redirect to UI which will guide user to enable device flow + start it
     app_name = app_info.get("app_name", "Gru")
+    app_id = app_info.get("app_id", "")
+    host = plugin._config.get("host", "github.com")
     return RedirectResponse(
         f"{server_url()}/#/auth-callback"
         f"?plugin={plugin_id}&status=app_registered&app_name={app_name}"
+        f"&app_id={app_id}&host={host}"
     )
