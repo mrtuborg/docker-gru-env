@@ -19,3 +19,11 @@
 - [2026-06-25] **Wiping gru-data volume is required to re-trigger wizard** — after the wizard completes it sets a `wizard_complete` flag in the DB. Restarting the container without `docker volume rm gru-data` keeps old data and shows the dashboard instead of the wizard. Always include `docker volume rm gru-data` when you need a fresh wizard run for testing.
 
 - [2026-06-25] **Connector rename: only UI/Python internals changed, not API/DB** — API URL paths remain `/api/plugins/*`, DB table stays `plugins`, JSON key stays `plugin_type`. Only Python class names and TypeScript symbols were renamed. Don't confuse the two layers when searching for references.
+
+- [2026-06-25] **Obsidian Sync has an official headless CLI** — `obsidian-headless` (npm package, `ob` command) is the official Obsidian-provided CLI for headless sync. Installed via `npm install -g obsidian-headless`. Supports `ob login`, `ob sync-setup --mode pull-only`, `ob sync`, `ob sync-status`. Auth via email/password or `OBSIDIAN_AUTH_TOKEN` env var. No reverse engineering or file-mount required. Node.js 22+ required in the Docker runtime.
+
+- [2026-06-25] **`Vault` is the right Lucide icon for Obsidian** — Lucide has a `Vault` icon that semantically matches Obsidian's core concept. Use it instead of `FileText` or `BookOpen`. `Diamond` and `Gem` are also available if more geometric styling is needed.
+
+- [2026-06-25] **obsidian-headless ob CLI version 0.0.12 is available** — confirmed installable via npm in the Docker runtime stage (`python:3.12-slim` + nodesource Node 22). `ob --version` returns `0.0.12`. Install after adding nodesource repo.
+
+- [2026-06-25] **The Obsidian Sync connector syncs to `/vault/ob-<id>/` inside the container** — each connector instance gets its own subdirectory under `/vault` (declared as a VOLUME). The board file path in config is relative to the vault root. md_kanban.py reads the synced files directly.

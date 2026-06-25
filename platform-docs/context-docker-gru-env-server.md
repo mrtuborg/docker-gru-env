@@ -9,7 +9,7 @@
 ### What this track is
 
 Building `gru-server` — a standalone Docker container mode with a React web UI wizard
-for configuring and authenticating connectors (GitHub, Azure, Copilot, Obsidian).
+for configuring and authenticating connectors (GitHub, Azure, Copilot, Obsidian Sync).
 Replaces the submodule-based `docker-gru-env` workflow with a browser-only setup.
 Note: code internals use "connector" everywhere; DB table + API URLs kept as "plugins" for backward compat.
 
@@ -19,15 +19,16 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 
 ### Needs Human
 
-- **End-to-end connector test** — container is fresh (no connectors). Run wizard at `localhost:9400`,
-  add GitHub → authorize OAuth → add Copilot (inherits GitHub token automatically) → verify health.
+- **End-to-end Obsidian Sync test** — requires an active Obsidian Sync subscription. Test wizard:
+  add Obsidian Sync connector with email/password/vault_name/board_path and verify health shows Healthy.
+- **End-to-end Copilot connector test** — go through wizard, add GitHub → authorize OAuth → add Copilot → verify health.
 
 ### Device State
 
 - Container: `gru-server-test` running on port 9400
 - Volume: `gru-data` (fresh — no connectors configured, wizard will show)
 - Mount: `~/.azure:/root/.azure` (writable — required for az CLI token cache)
-- Image: `gru-server:latest` (rebuilt 2026-06-25 with gh CLI 2.95 + az CLI)
+- Image: `gru-server:latest` (rebuilt 2026-06-25 — includes ob 0.0.12, gh 2.95, az CLI)
 - Restart command:
   ```bash
   docker rm -f gru-server-test && docker volume rm gru-data && \
@@ -37,15 +38,18 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 
 ### Next Action
 
-Next session: rework the Obsidian connector from a file-path-based MD reader into an
-**Obsidian Sync connector** — this means connecting to Obsidian Sync (cloud service) instead
-of requiring a local mounted directory. Research Obsidian Sync API/approach, propose design,
-then implement.
+All 4 connectors (GitHub, Copilot, Azure, Obsidian Sync) are implemented with health checks
+and wizard UI. Next session: design how these connectors are used together to build **pipelines,
+agents, and orchestration** — i.e. define the pipeline/watcher layer that sits on top of connectors.
+This is a design/architecture session before any new code is written.
 
-Remaining work on the feature branch:
-- Rework Obsidian MD connector → Obsidian Sync connector (next session goal)
-- Test Copilot connector health end-to-end after wizard setup
-- Open PR: `feature/gru-server` → `main`
+Questions to answer in the design:
+- How does the GitHub connector trigger a Copilot session (issue → session)?
+- How does the Obsidian connector trigger a Copilot session (kanban card → session)?
+- What is a "pipeline" — a named sequence of connector interactions?
+- How does Azure Storage factor in (artifact input/output for sessions)?
+- Where does session state/history live and who owns it?
+- Web UI for pipeline management (create, run, monitor)?
 
 ---
 
@@ -57,6 +61,15 @@ Remaining work on the feature branch:
 - **API URL paths**: `/api/plugins/*` (kept unchanged for backward compat)
 - **DB table**: `plugins` (unchanged)
 - **JSON key**: `plugin_type` (unchanged)
+
+### Connector summary (all 4 implemented)
+
+| Connector | Auth | Health check | Key config |
+|---|---|---|---|
+| GitHub | App Manifest → Device Code (GHE OAuth) | GHE API reachable + token valid | host, board_url, data_repo |
+| Copilot | Inherits GitHub token → `gh auth login` | gh available + token + gh-copilot extension | github_connector_id |
+| Azure | `~/.azure` mount + `az account get-access-token` | az CLI available + token works | storage_account, container |
+| Obsidian Sync | `ob login` email+password | ob available + sync-status + board file parseable | email, password, vault_name, board_path |
 
 ### Azure auth solution (final)
 
@@ -73,7 +86,15 @@ Remaining work on the feature branch:
 - No separate login. Reads GitHub token from vault via linked GitHub connector ID (auto-discovers if blank).
 - Runs `gh auth login --with-token` inside the container using that token.
 - Health check: gh available → token exists → `gh copilot` extension installed (DEGRADED if extension missing, not ERROR).
-- `gh copilot` extension must be installed post-auth: `gh extension install github/gh-copilot`.
+
+### Obsidian Sync connector
+
+- Uses official `obsidian-headless` npm package (`ob` CLI, version 0.0.12).
+- Auth: `ob login --email ... --password ...`; session cached in `~/.config/obsidian-headless/`.
+- Sync: `ob sync-setup --vault <name> --path /vault/ob-<id> --mode pull-only` → `ob sync`.
+- Board reading: existing `md_kanban.py` parser reads the synced `.md` file.
+- `/vault` declared as a Docker VOLUME; each connector instance uses `/vault/ob-<id>/`.
+- Requires Node.js 22 in the runtime image (added via nodesource).
 
 ### Build
 
@@ -96,10 +117,10 @@ docker build -f Dockerfile.server -t gru-server:latest .
 | `server/connectors/azure_connector.py` | Azure connector — az CLI subprocess auth |
 | `server/connectors/github_connector.py` | GitHub connector — App Manifest + Device Code |
 | `server/connectors/copilot_connector.py` | Copilot connector — gh CLI health, token from GitHub vault |
-| `server/connectors/obsidian_connector.py` | Obsidian connector — file-path MD reader (to be replaced) |
+| `server/connectors/obsidian_connector.py` | Obsidian Sync connector — ob CLI, pull-only sync, md_kanban |
 | `server/routers/connectors_api.py` | REST API serving `/api/plugins/*` endpoints |
-| `web/src/pages/Wizard.tsx` | Setup wizard — fetches availability, auth queue |
+| `web/src/pages/Wizard.tsx` | Setup wizard — connector cards + auth queue |
 | `web/src/components/ConnectorConfigForm.tsx` | Per-connector config forms |
-| `web/src/pages/Dashboard.tsx` | Dashboard with `useLocation().key` for refresh |
-| `Dockerfile.server` | Multi-stage build; installs az CLI + gh CLI 2.95 in runtime |
-| `lessons-learned.md` | Non-obvious discoveries (Azure auth, UX fixes, connector design) |
+| `web/src/pages/Dashboard.tsx` | Dashboard with connector health cards |
+| `Dockerfile.server` | Multi-stage build; installs az CLI + gh CLI 2.95 + Node 22 + ob |
+| `lessons-learned.md` | Non-obvious discoveries (Azure auth, connector design, obsidian CLI) |
