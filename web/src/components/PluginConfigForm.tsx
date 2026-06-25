@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, ExternalLink, Plus, Trash2 } from 'lucide-react'
 
 interface Field {
   key: string
@@ -49,15 +49,17 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
     { key: 'watcher_models',  label: 'Model Fallback List', type: 'model-list', hint: 'Ordered list of models. Priority 1 = preferred; higher = cheaper fallback after 3 consecutive failures.' },
   ],
   azure: [
-    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'az_cli',
+    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'sas_token',
       options: [
-        { value: 'az_cli',           label: 'Azure CLI (az login — no secrets needed)' },
+        { value: 'sas_token',         label: 'SAS Token (paste from Azure Portal)' },
         { value: 'service_principal', label: 'Service Principal (client ID + secret)' },
-        { value: 'device_code_flow',  label: 'Device Code Flow (browser auth)' },
       ],
-      hint: 'Azure CLI uses your existing "az login" session. Service Principal requires an app registration.' },
+      hint: 'SAS Token: generate from Azure Portal → Storage Account → Shared access signature. No IT admin needed.' },
     { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, hint: 'Azure Storage account name.' },
-    { key: 'container_name',  label: 'Container Name',     type: 'text',   placeholder: 'firmware', hint: 'Default blob container name.' },
+    { key: 'container',       label: 'Container Name',     type: 'text',   placeholder: 'firmware', hint: 'Default blob container name.' },
+    { key: '_sas_portal_link', label: '',                   type: 'link-button' as any, showWhen: { field: 'auth_method', value: 'sas_token' },
+      hint: 'Opens Azure Portal → Shared access signature page for this storage account.' },
+    { key: 'sas_token',       label: 'SAS Token',          type: 'password', placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...', hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.', showWhen: { field: 'auth_method', value: 'sas_token' } },
     { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
     { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
     { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
@@ -197,6 +199,19 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                 <select className="form-input" value={values[f.key]} onChange={e => set(f.key, e.target.value)} style={{ background:'var(--surface2)', color:'var(--text)' }}>
                   {f.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
                 </select>
+              ) : (f.type as string) === 'link-button' ? (
+                (() => {
+                  const acct = values['storage_account'] || 'ACCOUNT'
+                  const url = `https://portal.azure.com/#view/Microsoft_Azure_Storage/SharedAccessSignatureBlade/storageAccountId/%2Fsubscriptions%2F-%2FresourceGroups%2F-%2Fproviders%2FMicrosoft.Storage%2FstorageAccounts%2F${acct}`
+                  return (
+                    <a href={url} target="_blank" rel="noopener noreferrer"
+                      style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'8px 14px',
+                        background:'var(--accent)', color:'#fff', borderRadius:6, fontSize:13,
+                        fontWeight:500, textDecoration:'none', width:'fit-content' }}>
+                      <ExternalLink size={14}/> Generate SAS Token in Azure Portal
+                    </a>
+                  )
+                })()
               ) : (
                 <input className="form-input" type={f.type} value={values[f.key]}
                   onChange={e => set(f.key, f.type==='number' ? Number(e.target.value) : e.target.value)}

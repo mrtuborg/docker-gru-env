@@ -135,8 +135,9 @@ class GitHubPlugin(GruPlugin):
         return {
             "name": f"Gru Server ({host})",
             "url": base_url,
+            "hook_attributes": {"url": base_url + "/api/webhooks/github"},
             "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
-            "public": False,
+            "public": True,
             "default_permissions": {
                 "issues": "write",
                 "pull_requests": "write",
