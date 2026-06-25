@@ -34,6 +34,7 @@ from ..config import (
     get_pipeline, upsert_pipeline,
     create_pipeline_run, finish_pipeline_run, add_pipeline_run_item,
     get_pipeline_state, set_pipeline_state, clear_pipeline_state,
+    get_agent,
 )
 from ..vault import load_secret
 
@@ -260,25 +261,47 @@ class PipelineEngine:
             stage_cfg = next(
                 (s for s in stages if s["column_name"] == issue.stage), None
             )
-            if not stage_cfg or not stage_cfg.get("prompt"):
+            if not stage_cfg:
+                continue
+
+            # Resolve agent for this stage
+            agent_id = stage_cfg.get("agent_id", "")
+            agent_data = None
+            if agent_id:
+                agent_data = await get_agent(agent_id)
+            # Fall back to inline prompt if no agent
+            if not agent_data and not stage_cfg.get("prompt"):
                 continue
 
             counts["processed"] += 1
             current_model = model_list[current_model_idx] if model_list else ""
 
+            agent_label = f" via agent '{agent_id}'" if agent_data else ""
             self._emit(pid, "info",
                 f"Processing #{issue.number} ({issue.repo}) at stage '{issue.stage}'"
+                + agent_label
                 + (f" with {current_model}" if current_model else ""),
                 issue=issue.number, stage=issue.stage,
             )
 
-            # Render prompt
-            prompt = self._render_prompt(stage_cfg, issue, pipeline)
+            # Render prompt (task_prompt for agents, full prompt for inline)
+            if agent_data:
+                prompt = self._render_prompt_text(
+                    stage_cfg.get("task_prompt", "") or f"Process issue #{issue.number} at stage {issue.stage}",
+                    issue, pipeline, stage_cfg,
+                )
+            else:
+                prompt = self._render_prompt(stage_cfg, issue, pipeline)
+
+            # Write agent file if using custom agent
+            if agent_data:
+                self._write_agent_file(agent_data)
 
             # Execute session
             started_at = datetime.now(timezone.utc).isoformat()
             result = await self._run_session(
                 pipeline, issue, prompt, current_model,
+                agent_name=agent_id if agent_data else "",
             )
             ended_at = datetime.now(timezone.utc).isoformat()
 
@@ -495,10 +518,55 @@ class PipelineEngine:
 
         return result
 
+    def _render_prompt_text(
+        self, template: str, issue: BoardIssue, pipeline: dict,
+        stage_cfg: dict = None,
+    ) -> str:
+        """Render a prompt template string with variable substitution."""
+        if not template:
+            return ""
+        env_vars = {
+            "ISSUE_NUM": str(issue.number),
+            "REPO": pipeline.get("project_owner", "") + "/" + str(pipeline.get("project_number", "")),
+            "ISSUE_REPO": issue.repo,
+            "ISSUE_STAGE": issue.stage,
+            "GH_HOST": os.environ.get("GH_HOST", "github.com"),
+            "PROJECT_NUM": str(pipeline.get("project_number", "")),
+            "PROJECT_OWNER": pipeline.get("project_owner", ""),
+        }
+        if stage_cfg:
+            stage_env = stage_cfg.get("env", {})
+            if isinstance(stage_env, str):
+                try:
+                    stage_env = json.loads(stage_env)
+                except (json.JSONDecodeError, TypeError):
+                    stage_env = {}
+            env_vars.update(stage_env)
+
+        result = template
+        for key, value in env_vars.items():
+            result = result.replace(f"${{{key}}}", str(value))
+        return result
+
+    def _write_agent_file(self, agent_data: dict) -> None:
+        """Write an .agent.md file to ~/.copilot/agents/ for use by Copilot CLI."""
+        from ..routers.agents import build_agent_md
+
+        agents_dir = Path.home() / ".copilot" / "agents"
+        agents_dir.mkdir(parents=True, exist_ok=True)
+
+        content = agent_data.get("agent_md", "")
+        if not content:
+            content = build_agent_md(agent_data)
+
+        agent_file = agents_dir / f"{agent_data['id']}.agent.md"
+        agent_file.write_text(content)
+
     # ── Session execution ─────────────────────────────────────────────────────
 
     async def _run_session(
         self, pipeline: dict, issue: BoardIssue, prompt: str, model: str,
+        agent_name: str = "",
     ) -> SessionResult:
         """Execute a Copilot session as a subprocess."""
         timeout_hours = pipeline.get("session_timeout_hours", 4.0)
@@ -508,6 +576,8 @@ class PipelineEngine:
         cmd = ["timeout", str(timeout_secs), "gh", "copilot", "--"]
         if model:
             cmd.extend(["--model", model])
+        if agent_name:
+            cmd.extend(["--agent", agent_name])
         cmd.extend(["-p", prompt, "--yolo", "--no-ask-user"])
 
         env = {**os.environ, "GH_HOST": gh_host}

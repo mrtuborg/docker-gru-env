@@ -8,11 +8,21 @@ import {
 interface Stage {
   column: string
   actor: string
+  agent_id: string
+  task_prompt: string
   prompt: string
   on_success: string
   on_failure: string
   on_timeout: string
   env: Record<string, string>
+}
+
+interface AgentInfo {
+  id: string
+  name: string
+  description: string
+  model: string
+  tools: string[]
 }
 
 interface ModelConfig {
@@ -60,6 +70,8 @@ function normalizeStage(s: any): Stage {
   return {
     column: s.column || s.column_name || '',
     actor: s.actor || 'ai',
+    agent_id: s.agent_id || '',
+    task_prompt: s.task_prompt || '',
     prompt: s.prompt || '',
     on_success: s.on_success || '',
     on_failure: s.on_failure || '',
@@ -77,12 +89,14 @@ export default function PipelineEditor() {
   const [selectedStage, setSelectedStage] = useState<number>(-1)
   const [saving, setSaving] = useState(false)
   const [plugins, setPlugins] = useState<any[]>([])
+  const [agents, setAgents] = useState<AgentInfo[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [fetchingColumns, setFetchingColumns] = useState(false)
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
+    fetch('/api/agents').then(r => r.json()).then(setAgents).catch(() => {})
 
     if (isNew) {
       setPipeline({
@@ -118,7 +132,8 @@ export default function PipelineEditor() {
   const addStage = () => {
     if (!pipeline) return
     const newStage: Stage = {
-      column: '', actor: 'ai', prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
+      column: '', actor: 'ai', agent_id: '', task_prompt: '',
+      prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
     }
     update({ stages: [...pipeline.stages, newStage] })
     setSelectedStage(pipeline.stages.length)
@@ -144,6 +159,7 @@ export default function PipelineEditor() {
       const stages: Stage[] = columns.map((col: string) => ({
         column: col,
         actor: ['Review', 'Done', 'Backlog'].some(h => col.toLowerCase().includes(h.toLowerCase())) ? 'human' : 'ai',
+        agent_id: '', task_prompt: '',
         prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
       }))
       update({ stages })
@@ -430,22 +446,66 @@ export default function PipelineEditor() {
 
               {sel.actor === 'ai' && (
                 <>
+                  {/* Agent selector */}
                   <div style={{ marginBottom:16 }}>
-                    <label className="form-label">Prompt</label>
-                    <textarea className="form-input" rows={16} value={sel.prompt}
-                      onChange={e => updateStage(selectedStage, { prompt: e.target.value })}
-                      placeholder="# Stage Prompt&#10;&#10;Write the agent instructions here…"
-                      style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
-                      <label className="btn btn-ghost" style={{ fontSize:11, padding:'4px 8px', cursor:'pointer' }}>
-                        <Upload size={10}/> Load from file
-                        <input type="file" accept=".md,.txt" hidden onChange={e => {
-                          const file = e.target.files?.[0]
-                          if (file) file.text().then(text => updateStage(selectedStage, { prompt: text }))
-                        }}/>
-                      </label>
-                    </div>
+                    <label className="form-label">Agent</label>
+                    <select className="form-input"
+                      value={sel.agent_id || ''}
+                      onChange={e => updateStage(selectedStage, { agent_id: e.target.value })}>
+                      <option value="">— No agent (use inline prompt) —</option>
+                      {agents.map(a => (
+                        <option key={a.id} value={a.id}>{a.name} ({a.id})</option>
+                      ))}
+                    </select>
+                    {sel.agent_id && (() => {
+                      const ag = agents.find(a => a.id === sel.agent_id)
+                      if (!ag) return <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>Agent not found in library</p>
+                      return (
+                        <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 6, background: 'var(--surface2)', border: '1px solid var(--border)', fontSize: 12 }}>
+                          <span style={{ color: 'var(--muted)' }}>{ag.description}</span>
+                          <div style={{ display: 'flex', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                            {ag.model && <span className="badge" style={{ background: 'color-mix(in srgb, var(--purple) 15%, transparent)', color: 'var(--purple)' }}>{ag.model}</span>}
+                            {ag.tools.map(t => <span key={t} className="badge">{t}</span>)}
+                          </div>
+                        </div>
+                      )
+                    })()}
                   </div>
+
+                  {/* Task prompt (shown when agent is selected) */}
+                  {sel.agent_id && (
+                    <div style={{ marginBottom:16 }}>
+                      <label className="form-label">Task Prompt</label>
+                      <textarea className="form-input" rows={3}
+                        value={sel.task_prompt || ''}
+                        onChange={e => updateStage(selectedStage, { task_prompt: e.target.value })}
+                        placeholder="Process issue #${ISSUE_NUM} at stage ${ISSUE_STAGE}"
+                        style={{ fontFamily:'ui-monospace, monospace', fontSize:12 }}/>
+                      <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+                        Short instruction passed to the agent. Template variables are expanded.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Inline prompt (shown when no agent selected) */}
+                  {!sel.agent_id && (
+                    <div style={{ marginBottom:16 }}>
+                      <label className="form-label">Prompt</label>
+                      <textarea className="form-input" rows={16} value={sel.prompt}
+                        onChange={e => updateStage(selectedStage, { prompt: e.target.value })}
+                        placeholder="# Stage Prompt&#10;&#10;Write the agent instructions here…"
+                        style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
+                      <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
+                        <label className="btn btn-ghost" style={{ fontSize:11, padding:'4px 8px', cursor:'pointer' }}>
+                          <Upload size={10}/> Load from file
+                          <input type="file" accept=".md,.txt" hidden onChange={e => {
+                            const file = e.target.files?.[0]
+                            if (file) file.text().then(text => updateStage(selectedStage, { prompt: text }))
+                          }}/>
+                        </label>
+                      </div>
+                    </div>
+                  )}
 
                   <div style={{ marginBottom:16 }}>
                     <label className="form-label">Template Variables</label>

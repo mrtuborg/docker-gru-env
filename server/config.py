@@ -61,6 +61,25 @@ CREATE TABLE IF NOT EXISTS watcher_runs (
     FOREIGN KEY (plugin_id) REFERENCES plugins(id)
 );
 
+-- ── Agents ────────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS agents (
+    id              TEXT PRIMARY KEY,
+    name            TEXT NOT NULL,
+    description     TEXT DEFAULT '',
+    source          TEXT NOT NULL DEFAULT 'inline',
+    agent_md        TEXT NOT NULL DEFAULT '',
+    file_path       TEXT DEFAULT '',
+    repo_url        TEXT DEFAULT '',
+    repo_path       TEXT DEFAULT '',
+    repo_ref        TEXT DEFAULT 'main',
+    model           TEXT DEFAULT '',
+    tools_json      TEXT DEFAULT '[]',
+    mcp_servers_json TEXT DEFAULT '{}',
+    created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
+
 -- ── Pipelines ────────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS pipelines (
@@ -88,6 +107,8 @@ CREATE TABLE IF NOT EXISTS pipeline_stages (
     stage_index INTEGER NOT NULL,
     column_name TEXT NOT NULL,
     actor       TEXT NOT NULL DEFAULT 'ai',
+    agent_id    TEXT DEFAULT '',
+    task_prompt TEXT DEFAULT '',
     prompt      TEXT DEFAULT '',
     on_success  TEXT DEFAULT '',
     on_failure  TEXT DEFAULT '',
@@ -177,6 +198,70 @@ async def get_all_settings() -> dict[str, str]:
     async with aiosqlite.connect(get_db_path()) as db:
         async with db.execute("SELECT key, value FROM settings") as cur:
             return {row[0]: row[1] async for row in cur}
+
+
+# ── Agent CRUD ────────────────────────────────────────────────────────────────
+
+async def list_agents() -> list[dict]:
+    async with aiosqlite.connect(get_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM agents ORDER BY created_at") as cur:
+            rows = await cur.fetchall()
+            result = []
+            for r in rows:
+                d = dict(r)
+                d["tools"] = json.loads(d.pop("tools_json", "[]"))
+                d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+                result.append(d)
+            return result
+
+
+async def get_agent(agent_id: str) -> dict | None:
+    async with aiosqlite.connect(get_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute("SELECT * FROM agents WHERE id=?", (agent_id,)) as cur:
+            row = await cur.fetchone()
+            if not row:
+                return None
+            d = dict(row)
+            d["tools"] = json.loads(d.pop("tools_json", "[]"))
+            d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+            return d
+
+
+async def upsert_agent(data: dict) -> None:
+    async with aiosqlite.connect(get_db_path()) as db:
+        await db.execute(
+            """INSERT INTO agents(id, name, description, source, agent_md,
+                   file_path, repo_url, repo_path, repo_ref,
+                   model, tools_json, mcp_servers_json, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+               ON CONFLICT(id) DO UPDATE SET
+                   name=excluded.name, description=excluded.description,
+                   source=excluded.source, agent_md=excluded.agent_md,
+                   file_path=excluded.file_path, repo_url=excluded.repo_url,
+                   repo_path=excluded.repo_path, repo_ref=excluded.repo_ref,
+                   model=excluded.model, tools_json=excluded.tools_json,
+                   mcp_servers_json=excluded.mcp_servers_json,
+                   updated_at=excluded.updated_at""",
+            (
+                data["id"], data["name"], data.get("description", ""),
+                data.get("source", "inline"), data.get("agent_md", ""),
+                data.get("file_path", ""), data.get("repo_url", ""),
+                data.get("repo_path", ""), data.get("repo_ref", "main"),
+                data.get("model", ""),
+                json.dumps(data.get("tools", [])),
+                json.dumps(data.get("mcp_servers", {})),
+            ),
+        )
+        await db.commit()
+
+
+async def delete_agent(agent_id: str) -> bool:
+    async with aiosqlite.connect(get_db_path()) as db:
+        cur = await db.execute("DELETE FROM agents WHERE id=?", (agent_id,))
+        await db.commit()
+        return cur.rowcount > 0
 
 
 # ── Plugin CRUD ───────────────────────────────────────────────────────────────
@@ -335,10 +420,11 @@ async def upsert_pipeline(data: dict) -> None:
         for i, stage in enumerate(data.get("stages", [])):
             await db.execute(
                 """INSERT INTO pipeline_stages(pipeline_id, stage_index, column_name, actor,
-                       prompt, on_success, on_failure, on_timeout, env_json)
-                   VALUES(?,?,?,?,?,?,?,?,?)""",
+                       agent_id, task_prompt, prompt, on_success, on_failure, on_timeout, env_json)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     pid, i, stage["column"], stage.get("actor", "ai"),
+                    stage.get("agent_id", ""), stage.get("task_prompt", ""),
                     stage.get("prompt", ""), stage.get("on_success", ""),
                     stage.get("on_failure", ""), stage.get("on_timeout", ""),
                     json.dumps(stage.get("env", {})),

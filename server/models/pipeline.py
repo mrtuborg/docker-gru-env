@@ -20,6 +20,8 @@ class FindingsBoard(BaseModel):
 class PipelineStage(BaseModel):
     column: str
     actor: str = "ai"
+    agent_id: Optional[str] = ""
+    task_prompt: Optional[str] = ""
     prompt: str = ""
     on_success: str = ""
     on_failure: str = ""
