@@ -6,7 +6,7 @@ interface Field {
   label: string
   type: 'text' | 'password' | 'number' | 'checkbox' | 'select' | 'textarea' | 'taglist' | 'model-list'
   placeholder?: string
-  hint?: string
+  hint?: string | ((values: Record<string, any>) => string)
   required?: boolean
   options?: { value: string; label: string }[]
   defaultValue?: string | number | boolean
@@ -80,7 +80,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
     { key: 'subscription_id', label: 'Subscription ID',    type: 'text',   placeholder: 'cafb472d-94f8-4b59-bdcc-7eb10b0e6fde', wizard: true,
       hint: 'Run: az account show --query id -o tsv' },
     { key: 'resource_group',  label: 'Resource Group',     type: 'text',   placeholder: 'rg-roommate-esw-prod', wizard: true,
-      hint: 'Run: az storage account show --name <storage_account> --query resourceGroup -o tsv' },
+      hint: (v) => `Run: az storage account show --name ${v.storage_account || '<storage_account>'} --query resourceGroup -o tsv` },
     { key: 'container',       label: 'Container Name',     type: 'text',   placeholder: 'firmware', wizard: true,
       hint: 'Default blob container name.' },
     { key: '_sas_portal_link', label: '', type: 'link-button' as any, wizard: true,
@@ -219,7 +219,7 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                 style={{ width:16, height:16, accentColor:'var(--accent)', cursor:'pointer', marginTop:1 }}/>
               <div>
                 <span style={{ fontSize:13, fontWeight:500 }}>{f.label}</span>
-                {f.hint && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{f.hint}</div>}
+                {f.hint && <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{typeof f.hint === 'function' ? f.hint(values) : f.hint}</div>}
               </div>
             </label>
           ) : (
@@ -267,7 +267,7 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                   onChange={e => set(f.key, f.type==='number' ? Number(e.target.value) : e.target.value)}
                   placeholder={f.placeholder}/>
               )}
-              {f.hint && <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>{f.hint}</div>}
+              {f.hint && <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>{typeof f.hint === 'function' ? f.hint(values) : f.hint}</div>}
             </>
           )}
         </div>
