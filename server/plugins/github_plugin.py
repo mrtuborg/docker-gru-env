@@ -75,11 +75,22 @@ class GitHubPlugin(GruPlugin):
     async def configure(self, config: dict) -> None:
         self._config = config
         self._token: str | None = await load_secret(self.plugin_id, "token")
+        # If no stored token, try gh CLI auth
+        if not self._token:
+            self._token = await self._get_gh_cli_token()
+            if self._token:
+                await store_secret(self.plugin_id, "token", self._token)
 
     async def health(self) -> PluginHealth:
         token = await load_secret(self.plugin_id, "token")
         if not token:
-            return PluginHealth(HealthStatus.ERROR, "No token configured — connect via OAuth or PAT")
+            # Try gh CLI as fallback
+            token = await self._get_gh_cli_token()
+            if token:
+                await store_secret(self.plugin_id, "token", token)
+
+        if not token:
+            return PluginHealth(HealthStatus.ERROR, "No token — run 'gh auth login' or paste a PAT")
 
         host = self._config.get("host", "github.com")
         url = f"https://{host}/api/v3/user" if host != "github.com" else "https://api.github.com/user"
@@ -97,6 +108,23 @@ class GitHubPlugin(GruPlugin):
             return PluginHealth(HealthStatus.ERROR, f"Cannot reach {host}")
         except Exception as exc:
             return PluginHealth(HealthStatus.ERROR, str(exc))
+
+    async def _get_gh_cli_token(self) -> str | None:
+        """Get token from gh CLI auth for this host."""
+        import asyncio
+        host = self._config.get("host", "github.com")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "auth", "token", "--hostname", host,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0 and stdout.strip():
+                return stdout.decode().strip()
+        except FileNotFoundError:
+            pass
+        return None
 
     async def teardown(self) -> None:
         pass  # No background tasks in base GitHub plugin

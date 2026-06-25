@@ -69,9 +69,11 @@ export default function Wizard({ onComplete }: WizardProps) {
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
 
-      // If GitHub was selected and no PAT was provided, start OAuth flow
+      // If GitHub was selected and no PAT was provided, try OAuth for github.com
+      // For GHE hosts, gh CLI auth is used automatically (no OAuth app needed)
       const ghConfig = configs['github'] || {}
-      if (selected.includes('github') && !ghConfig.token) {
+      const ghHost = (ghConfig.host || 'github.com').toLowerCase()
+      if (selected.includes('github') && !ghConfig.token && ghHost === 'github.com') {
         setOauthPluginId(pluginIds['github'])
       }
       setStep(3)

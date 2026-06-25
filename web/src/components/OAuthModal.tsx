@@ -14,8 +14,13 @@ export default function OAuthModal({ pluginId, onClose }: OAuthModalProps) {
 
   useEffect(() => {
     fetch(`/api/plugins/${pluginId}/auth/device/start`, { method:'POST' })
-      .then(r => r.json())
-      .then(d => {
+      .then(async r => {
+        const d = await r.json()
+        if (!r.ok) {
+          setStatus('error')
+          setMessage(d.detail || 'Failed to start device flow')
+          return
+        }
         setFlowData(d)
         setStatus('waiting')
         setCountdown(d.expires_in || 900)
