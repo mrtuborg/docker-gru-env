@@ -44,7 +44,7 @@ export default function Wizard({ onComplete }: WizardProps) {
       const pluginIds: Record<string, string> = {}
       for (const [i, typeId] of selected.entries()) {
         const cfg = configs[typeId] || {}
-        const { token, client_secret, ...rest } = cfg as any
+        const { token, client_secret, sas_token, ...rest } = cfg as any
         const pluginId = `${typeId}-${i === 0 ? 'main' : i}`
         pluginIds[typeId] = pluginId
         const createResp = await fetch('/api/plugins', {
@@ -81,8 +81,8 @@ export default function Wizard({ onComplete }: WizardProps) {
         const cfg = configs[typeId] || {}
         // Skip if user provided a token/PAT
         if (cfg.token) continue
-        // Skip plugins that don't need OAuth (copilot, obsidian)
-        if (typeId !== 'github' && typeId !== 'azure') continue
+        // Only GitHub needs OAuth flow; Azure uses SAS token (pasted in config)
+        if (typeId !== 'github') continue
 
         // Check auth status
         const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
@@ -91,14 +91,11 @@ export default function Wizard({ onComplete }: WizardProps) {
 
         if (authStatus.has_token) continue
 
-        if (typeId === 'github' && authStatus.needs_manifest) {
+        if (authStatus.needs_manifest) {
           // GHE — need to register a GitHub App first
           pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
-        } else if (typeId === 'github' && authStatus.has_client_id) {
+        } else if (authStatus.has_client_id) {
           // github.com or GHE with client_id — device flow
-          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
-        } else if (typeId === 'azure') {
-          // Azure always supports device flow
           pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
         }
       }

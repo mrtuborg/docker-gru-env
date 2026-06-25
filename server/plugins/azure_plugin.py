@@ -1,9 +1,9 @@
 """
-Azure Plugin — manages Azure Blob Storage tokens with auto-refresh.
+Azure Plugin — manages Azure Blob Storage access.
 
 Auth:
-  - browser:           Azure Device Code Flow (user signs in via microsoft.com/devicelogin)
-  - service_principal:  tenant_id + client_id + client_secret (headless CI)
+  - sas_token:         Shared Access Signature (user generates from Azure Portal)
+  - service_principal: tenant_id + client_id + client_secret (headless CI)
 """
 from __future__ import annotations
 
@@ -23,9 +23,6 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_REFRESH_INTERVAL = 50 * 60  # 50 minutes
 _TOKEN_FILE = Path(os.environ.get("AZURE_TOKEN_FILE", "/tmp/.azure-storage-token"))
-
-# Well-known Azure CLI public client_id — used by az, azd, terraform, etc.
-_AZURE_CLI_CLIENT_ID = "04b07795-a710-4e09-9b56-0d023a5d76cd"
 
 
 class AzurePlugin(GruPlugin):
@@ -56,19 +53,23 @@ class AzurePlugin(GruPlugin):
     def config_schema(cls) -> dict:
         return {
             "type": "object",
-            "required": ["storage_account"],
+            "required": ["storage_account", "auth_method"],
             "properties": {
                 "auth_method": {
                     "type": "string",
                     "title": "Auth Method",
-                    "enum": ["browser", "service_principal"],
-                    "default": "browser",
+                    "enum": ["sas_token", "service_principal"],
+                    "default": "sas_token",
                 },
                 "storage_account": {"type": "string", "title": "Storage Account Name"},
-                "container":       {"type": "string", "title": "Blob Container Name"},
+                "container":       {"type": "string", "title": "Blob Container Name", "default": ""},
+                "sas_token": {
+                    "type": "string", "title": "SAS Token",
+                    "description": "Generate from Azure Portal → Storage Account → Shared access signature",
+                    "showWhen": {"field": "auth_method", "value": "sas_token"},
+                },
                 "tenant_id": {
                     "type": "string", "title": "Tenant ID",
-                    "description": "Required for service principal. For browser auth, 'organizations' is used.",
                     "showWhen": {"field": "auth_method", "value": "service_principal"},
                 },
                 "client_id": {
@@ -83,35 +84,66 @@ class AzurePlugin(GruPlugin):
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
 
-        token = await load_secret(self.plugin_id, "access_token")
-        if token:
-            self._write_token_file(token)
-            self._refresh_task = asyncio.create_task(self._refresh_loop())
+        auth_method = config.get("auth_method", "sas_token")
+
+        if auth_method == "sas_token":
+            # SAS tokens are stored in config, no refresh needed
+            sas = config.get("sas_token", "")
+            if sas:
+                await store_secret(self.plugin_id, "sas_token", sas)
+        elif auth_method == "service_principal":
+            token = await load_secret(self.plugin_id, "access_token")
+            if token:
+                self._write_token_file(token)
+                self._refresh_task = asyncio.create_task(self._refresh_loop())
 
     async def health(self) -> PluginHealth:
         storage_account = self._config.get("storage_account", "")
         if not storage_account:
             return PluginHealth(HealthStatus.ERROR, "Storage account not configured")
 
+        auth_method = self._config.get("auth_method", "sas_token")
+
+        if auth_method == "sas_token":
+            sas = await load_secret(self.plugin_id, "sas_token")
+            if not sas:
+                return PluginHealth(
+                    HealthStatus.ERROR,
+                    "No SAS token — paste one from Azure Portal",
+                    {"needs_auth": True},
+                )
+            # Validate by listing blobs (quick HEAD request)
+            container = self._config.get("container", "")
+            if container:
+                try:
+                    url = f"https://{storage_account}.blob.core.windows.net/{container}{sas}&restype=container&comp=list&maxresults=1"
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        resp = await client.get(url)
+                    if resp.status_code == 200:
+                        return PluginHealth(HealthStatus.HEALTHY, f"SAS token valid for {storage_account}/{container}")
+                    elif resp.status_code == 403:
+                        return PluginHealth(HealthStatus.ERROR, "SAS token expired or invalid permissions")
+                    elif resp.status_code == 404:
+                        return PluginHealth(HealthStatus.DEGRADED, f"Container '{container}' not found")
+                except Exception as exc:
+                    return PluginHealth(HealthStatus.DEGRADED, f"Cannot validate: {exc}")
+            return PluginHealth(HealthStatus.HEALTHY, f"SAS token configured for {storage_account}")
+
+        # service_principal
         token = await load_secret(self.plugin_id, "access_token")
         if not token:
             return PluginHealth(
                 HealthStatus.ERROR,
-                "Not authenticated — click Authorize to sign in via browser",
+                "Not authenticated — configure service principal credentials",
                 {"needs_auth": True},
             )
 
         if self._consecutive_failures >= 3:
             return PluginHealth(
                 HealthStatus.ERROR,
-                "Token refresh failing — re-authorization required",
+                "Token refresh failing — check service principal credentials",
                 {"consecutive_failures": self._consecutive_failures, "needs_auth": True},
             )
-
-        if _TOKEN_FILE.exists():
-            age_s = time.time() - _TOKEN_FILE.stat().st_mtime
-            if age_s > _TOKEN_REFRESH_INTERVAL + 600:
-                return PluginHealth(HealthStatus.DEGRADED, "Token file stale — refresh may have failed")
 
         return PluginHealth(HealthStatus.HEALTHY, f"Token active for {storage_account}")
 
@@ -126,67 +158,7 @@ class AzurePlugin(GruPlugin):
         _TOKEN_FILE.write_text(token)
         _TOKEN_FILE.chmod(0o600)
 
-    # ── Azure Device Code Flow ────────────────────────────────────────────────
-
-    async def start_device_flow(self) -> dict:
-        """Start Azure AD device code flow for storage access."""
-        tenant = self._config.get("tenant_id", "") or "organizations"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/devicecode",
-                data={
-                    "client_id": _AZURE_CLI_CLIENT_ID,
-                    "scope": "https://storage.azure.com/.default offline_access",
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-        return {
-            "user_code": data["user_code"],
-            "verification_uri": data["verification_uri"],
-            "device_code": data["device_code"],
-            "expires_in": data.get("expires_in", 900),
-            "interval": data.get("interval", 5),
-            "message": data.get("message", ""),
-        }
-
-    async def poll_device_flow(self, device_code: str, interval: int = 5) -> Optional[str]:
-        """Poll Azure AD for token. Also stores the refresh_token for auto-refresh."""
-        tenant = self._config.get("tenant_id", "") or "organizations"
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
-                data={
-                    "client_id": _AZURE_CLI_CLIENT_ID,
-                    "device_code": device_code,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-                },
-            )
-            data = resp.json()
-
-        error = data.get("error")
-        if error == "authorization_pending":
-            return None
-        if error == "slow_down":
-            return None
-        if error in ("expired_token", "authorization_declined"):
-            raise RuntimeError(f"Azure auth error: {error}")
-        if error:
-            raise RuntimeError(f"Azure auth error: {error} — {data.get('error_description', '')}")
-
-        access_token = data.get("access_token")
-        if access_token:
-            await store_secret(self.plugin_id, "access_token", access_token)
-            self._write_token_file(access_token)
-            if data.get("refresh_token"):
-                await store_secret(self.plugin_id, "refresh_token", data["refresh_token"])
-            if not self._refresh_task or self._refresh_task.done():
-                self._refresh_task = asyncio.create_task(self._refresh_loop())
-            return access_token
-        return None
-
-    # ── Auto-refresh loop ─────────────────────────────────────────────────────
+    # ── Auto-refresh loop (service_principal only) ────────────────────────────
 
     async def _refresh_loop(self) -> None:
         """Refresh token every 50 minutes."""
@@ -206,44 +178,6 @@ class AzurePlugin(GruPlugin):
                 logger.warning("Azure token refresh failed (%d): %s", self._consecutive_failures, exc)
 
     async def _refresh_token(self) -> Optional[str]:
-        """Attempt to refresh the Azure storage token."""
-        # Try refresh_token first (from device code flow)
-        refresh_token = await load_secret(self.plugin_id, "refresh_token")
-        if refresh_token:
-            token = await self._refresh_with_rt(refresh_token)
-            if token:
-                return token
-
-        auth_method = self._config.get("auth_method", "browser")
-        if auth_method == "service_principal":
-            return await self._refresh_service_principal()
-
-        return None
-
-    async def _refresh_with_rt(self, refresh_token: str) -> Optional[str]:
-        """Use refresh_token to get a new access_token."""
-        tenant = self._config.get("tenant_id", "") or "organizations"
-        try:
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.post(
-                    f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
-                    data={
-                        "client_id": _AZURE_CLI_CLIENT_ID,
-                        "grant_type": "refresh_token",
-                        "refresh_token": refresh_token,
-                        "scope": "https://storage.azure.com/.default offline_access",
-                    },
-                )
-                data = resp.json()
-            if "access_token" in data:
-                if data.get("refresh_token"):
-                    await store_secret(self.plugin_id, "refresh_token", data["refresh_token"])
-                return data["access_token"]
-        except Exception as exc:
-            logger.warning("Refresh token exchange failed: %s", exc)
-        return None
-
-    async def _refresh_service_principal(self) -> Optional[str]:
         """Refresh via service principal credentials."""
         tenant_id = self._config.get("tenant_id", "")
         client_id = self._config.get("client_id", "")
