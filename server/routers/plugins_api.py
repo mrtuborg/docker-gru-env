@@ -11,8 +11,22 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .auth import register_manifest_state
+from ..plugins.azure_plugin import azure_available
 
 router = APIRouter()
+
+
+# ── Plugin type availability ──────────────────────────────────────────────────
+
+@router.get("/types")
+async def plugin_types():
+    """Return available plugin types with availability flags."""
+    return [
+        {"id": "github",   "available": True},
+        {"id": "copilot",  "available": True},
+        {"id": "azure",    "available": azure_available()},
+        {"id": "obsidian", "available": True},
+    ]
 
 
 class CreatePluginRequest(BaseModel):

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { CheckCircle2, GitBranch, Bot, Cloud, FileText, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react'
 import PluginConfigForm from '../components/PluginConfigForm'
 import OAuthModal from '../components/OAuthModal'
@@ -26,9 +26,19 @@ export default function Wizard({ onComplete }: WizardProps) {
   const [configs, setConfigs] = useState<Record<string, Record<string, any>>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [availableTypes, setAvailableTypes] = useState<Set<string>>(new Set(['github','copilot','obsidian']))
   // Auth flow queue — process one at a time
   const [authQueue, setAuthQueue] = useState<AuthFlowItem[]>([])
   const [currentAuth, setCurrentAuth] = useState<AuthFlowItem | null>(null)
+
+  useEffect(() => {
+    fetch('/api/plugins/types')
+      .then(r => r.json())
+      .then((types: { id: string; available: boolean }[]) => {
+        setAvailableTypes(new Set(types.filter(t => t.available).map(t => t.id)))
+      })
+      .catch(() => {}) // keep defaults on error
+  }, [])
 
   const stepLabels = ['Welcome', 'Plugins', ...(selected.length > 0 ? ['Configure'] : []), 'Done']
   const visualStep = step === 0 ? 0 : step === 1 ? 1 : step === 2 && selected.length > 0 ? 2 : stepLabels.length - 1
@@ -53,7 +63,7 @@ export default function Wizard({ onComplete }: WizardProps) {
       const pluginIds: Record<string, string> = {}
       for (const [i, typeId] of selected.entries()) {
         const cfg = configs[typeId] || {}
-        const { token, client_secret, sas_token, ...rest } = cfg as any
+        const { token, ...rest } = cfg as any
         const pluginId = `${typeId}-${i === 0 ? 'main' : i}`
         pluginIds[typeId] = pluginId
         const createResp = await fetch('/api/plugins', {
@@ -66,9 +76,7 @@ export default function Wizard({ onComplete }: WizardProps) {
           throw new Error(d.detail || `Failed to create ${typeId} plugin`)
         }
         // Store credentials in vault (never in config)
-        if (token)         await storeSecret(pluginId, 'token', token)
-        if (sas_token)     await storeSecret(pluginId, 'sas_token', sas_token)
-        if (client_secret) await storeSecret(pluginId, 'client_secret', client_secret)
+        if (token) await storeSecret(pluginId, 'token', token)
 
         fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
       }
@@ -92,14 +100,8 @@ export default function Wizard({ onComplete }: WizardProps) {
           } else if (authStatus.has_client_id) {
             pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
           }
-        } else if (typeId === 'azure' && cfg.auth_method === 'azure_ad') {
-          const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
-          if (!statusResp.ok) continue
-          const authStatus = await statusResp.json()
-          if (!authStatus.has_token) {
-            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
-          }
         }
+        // Azure uses az CLI credentials — no browser OAuth needed
       }
 
       if (pendingAuth.length > 0) {
@@ -182,7 +184,7 @@ export default function Wizard({ onComplete }: WizardProps) {
             <h2 style={{ fontSize:18, fontWeight:700, marginBottom:4 }}>Connect Plugins</h2>
             <p style={{ color:'var(--muted)', marginBottom:20, fontSize:13 }}>Select the tools you want to connect. You can add more later.</p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:24 }}>
-              {PLUGIN_TYPES.map(({ id, name, icon: Icon, color, desc }) => {
+              {PLUGIN_TYPES.filter(({ id }) => availableTypes.has(id)).map(({ id, name, icon: Icon, color, desc }) => {
                 const active = selected.includes(id)
                 return (
                   <div key={id}
