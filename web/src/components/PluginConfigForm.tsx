@@ -81,7 +81,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'Default blob container name.' },
     { key: '_sas_portal_link', label: '', type: 'link-button' as any, wizard: true,
       showWhen: { field: 'auth_method', value: 'sas_token' },
-      hint: 'Opens Azure Portal → Shared access signature page for this storage account.' },
+      hint: 'In Azure Portal: select your storage account → "Shared access signature" in the left menu → set permissions and expiry → click "Generate SAS and connection string" → copy the SAS token.' },
     { key: 'sas_token',       label: 'SAS Token',          type: 'password', wizard: true,
       placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...',
       hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.',
@@ -243,14 +243,17 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                 </select>
               ) : (f.type as string) === 'link-button' ? (
                 (() => {
-                  const acct = values['storage_account'] || 'ACCOUNT'
-                  const url = `https://portal.azure.com/#view/Microsoft_Azure_Storage/SharedAccessSignatureBlade/storageAccountId/%2Fsubscriptions%2F-%2FresourceGroups%2F-%2Fproviders%2FMicrosoft.Storage%2FstorageAccounts%2F${acct}`
+                  const acct = values['storage_account']
+                  // Link to the specific storage account if name is known, else to the accounts list
+                  const url = acct
+                    ? `https://portal.azure.com/#view/Microsoft_Azure_Storage/StorageMenuBlade/~/sas/storageAccountId/${encodeURIComponent(`/providers/Microsoft.Storage/storageAccounts/${acct}`)}`
+                    : 'https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/Microsoft.Storage%2FstorageAccounts'
                   return (
                     <a href={url} target="_blank" rel="noopener noreferrer"
                       style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'8px 14px',
                         background:'var(--accent)', color:'#fff', borderRadius:6, fontSize:13,
                         fontWeight:500, textDecoration:'none', width:'fit-content' }}>
-                      <ExternalLink size={14}/> Generate SAS Token in Azure Portal
+                      <ExternalLink size={14}/> Open Azure Portal → Shared access signature
                     </a>
                   )
                 })()
