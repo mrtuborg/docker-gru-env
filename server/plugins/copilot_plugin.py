@@ -60,23 +60,36 @@ class CopilotPlugin(GruPlugin):
         self._config = config
 
     async def health(self) -> PluginHealth:
-        # Check Docker is available and image exists
+        # In server mode, check if gh copilot CLI is available
+        import asyncio
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "gh", "copilot", "--version",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, _ = await proc.communicate()
+            if proc.returncode == 0:
+                version = stdout.decode().strip().split('\n')[0]
+                return PluginHealth(HealthStatus.HEALTHY, f"Copilot CLI available ({version})")
+        except FileNotFoundError:
+            pass
+
+        # Fallback: check Docker (submodule mode)
         try:
             import docker as docker_sdk
             client = docker_sdk.from_env()
             client.ping()
-        except Exception as exc:
-            return PluginHealth(HealthStatus.ERROR, f"Docker unavailable: {exc}")
-
-        image_name = "gru:local"
-        try:
-            client.images.get(image_name)
-            return PluginHealth(HealthStatus.HEALTHY, f"Docker OK, image {image_name} present")
+            image_name = "gru:local"
+            try:
+                client.images.get(image_name)
+                return PluginHealth(HealthStatus.HEALTHY, f"Docker OK, image {image_name} present")
+            except Exception:
+                return PluginHealth(HealthStatus.DEGRADED, f"Image {image_name} not built")
         except Exception:
-            return PluginHealth(
-                HealthStatus.DEGRADED,
-                f"Image {image_name} not built — run 'source ./gru' first",
-            )
+            pass
+
+        return PluginHealth(HealthStatus.ERROR, "Neither gh copilot CLI nor Docker available")
 
     async def teardown(self) -> None:
         pass
