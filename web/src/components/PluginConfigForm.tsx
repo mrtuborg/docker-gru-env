@@ -243,17 +243,12 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                 </select>
               ) : (f.type as string) === 'link-button' ? (
                 (() => {
-                  const acct = values['storage_account']
-                  // Link to the specific storage account if name is known, else to the accounts list
-                  const url = acct
-                    ? `https://portal.azure.com/#view/Microsoft_Azure_Storage/StorageMenuBlade/~/sas/storageAccountId/${encodeURIComponent(`/providers/Microsoft.Storage/storageAccounts/${acct}`)}`
-                    : 'https://portal.azure.com/#view/HubsExtension/BrowseResource/resourceType/Microsoft.Storage%2FstorageAccounts'
                   return (
-                    <a href={url} target="_blank" rel="noopener noreferrer"
+                    <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer"
                       style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'8px 14px',
                         background:'var(--accent)', color:'#fff', borderRadius:6, fontSize:13,
                         fontWeight:500, textDecoration:'none', width:'fit-content' }}>
-                      <ExternalLink size={14}/> Open Azure Portal → Shared access signature
+                      <ExternalLink size={14}/> Open Azure Portal
                     </a>
                   )
                 })()
