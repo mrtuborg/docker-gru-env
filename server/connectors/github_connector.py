@@ -27,7 +27,7 @@ _APP_CLIENT_ID_KEY = "app_client_id"
 _APP_CLIENT_SECRET_KEY = "app_client_secret"
 
 
-class GitHubPlugin(GruConnector):
+class GitHubConnector(GruConnector):
 
     @property
     def connector_type(self) -> str:

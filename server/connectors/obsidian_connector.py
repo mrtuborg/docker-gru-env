@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _MD_KANBAN = Path(__file__).parents[2] / "src" / "md_kanban.py"
 
 
-class ObsidianPlugin(GruConnector):
+class ObsidianConnector(GruConnector):
 
     def __init__(self, plugin_id: str, config: dict) -> None:
         super().__init__(plugin_id, config)

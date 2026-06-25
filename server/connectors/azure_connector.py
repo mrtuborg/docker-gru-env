@@ -21,7 +21,7 @@ def azure_available() -> bool:
     return _AZURE_DIR.exists()
 
 
-class AzurePlugin(GruConnector):
+class AzureConnector(GruConnector):
 
     @property
     def connector_type(self) -> str:
