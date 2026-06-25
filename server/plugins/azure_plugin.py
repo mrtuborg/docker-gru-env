@@ -87,29 +87,49 @@ class AzurePlugin(GruPlugin):
     # ── Internal ──────────────────────────────────────────────────────────────
 
     async def _test_credential(self) -> bool:
-        """Try DefaultAzureCredential against the storage account."""
+        """Try AzureCliCredential against the storage account."""
         storage_account = self._config.get("storage_account", "")
         container       = self._config.get("container", "artifacts")
         if not storage_account:
             return False
         try:
             import asyncio
-            from azure.identity import DefaultAzureCredential
-            from azure.storage.blob import BlobServiceClient
+            import subprocess, json as _json
+
+            def _get_token() -> str:
+                result = subprocess.run(
+                    ["az", "account", "get-access-token",
+                     "--resource", "https://storage.azure.com/",
+                     "--query", "accessToken", "-o", "tsv"],
+                    capture_output=True, text=True, timeout=20,
+                )
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip())
+                return result.stdout.strip()
 
             def _check():
-                cred   = DefaultAzureCredential(exclude_environment_credential=True,
-                                                exclude_workload_identity_credential=True,
-                                                exclude_managed_identity_credential=True)
+                from azure.storage.blob import BlobServiceClient
+                from azure.core.credentials import AccessToken
+                import time
+
+                token_str = _get_token()
+
+                class _StaticCred:
+                    def get_token(self, *scopes, **kwargs):
+                        return AccessToken(token_str, int(time.time()) + 3600)
+
                 client = BlobServiceClient(
                     f"https://{storage_account}.blob.core.windows.net",
-                    credential=cred,
+                    credential=_StaticCred(),
                 )
                 cc = client.get_container_client(container)
                 next(iter(cc.list_blobs(results_per_page=1)), None)
                 return True
 
-            return await asyncio.get_event_loop().run_in_executor(None, _check)
+            return await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, _check),
+                timeout=30,
+            )
         except Exception as exc:
             logger.debug("Azure credential test failed: %s", exc)
             return False
