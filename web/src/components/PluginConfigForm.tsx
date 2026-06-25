@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Plus, Trash2 } from 'lucide-react'
 
 interface Field {
@@ -146,13 +146,13 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
     })
     return d
   }
-  const [values, setValues] = useState<Record<string, any>>(() => {
-    const defaults = mkDefaults()
-    // Notify parent of defaults on mount so they get saved
-    setTimeout(() => onChange(defaults), 0)
-    return defaults
-  })
+  const [values, setValues] = useState<Record<string, any>>(mkDefaults)
   const [showPw, setShowPw] = useState<Record<string, boolean>>({})
+
+  // Emit defaults to parent on mount (and when pluginType changes via key)
+  useEffect(() => {
+    onChange(values)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const set = (key: string, val: any) => { const n = {...values, [key]: val}; setValues(n); onChange(n) }
 
