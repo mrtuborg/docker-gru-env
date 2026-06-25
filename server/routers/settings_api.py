@@ -37,11 +37,11 @@ async def update_settings(body: UpdateSettingsRequest, request: Request):
 @router.get("/export")
 async def export_config(request: Request):
     """Export current plugin config as .gru/config.yml format."""
-    pm = request.app.state.plugins
-    github_plugins = pm.get_by_type("github")
-    if not github_plugins:
+    pm = request.app.state.connectors
+    github_connectors = pm.get_by_type("github")
+    if not github_connectors:
         raise HTTPException(400, "No GitHub plugin configured — nothing to export")
-    plugin = github_plugins[0]
+    plugin = github_connectors[0]
     cfg = plugin._config
     data = {
         "gh_host":   cfg.get("host", "github.com"),
@@ -78,7 +78,7 @@ async def import_config(request: Request):
     except yaml.YAMLError as exc:
         raise HTTPException(400, f"Invalid YAML: {exc}")
 
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     config = {
         "host":            data.get("gh_host", "github.com"),
         "data_repo":       data.get("data_repo", ""),

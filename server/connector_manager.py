@@ -1,5 +1,5 @@
 """
-Plugin Manager — registry, lifecycle, and health aggregation.
+Connector Manager — registry, lifecycle, and health aggregation.
 """
 from __future__ import annotations
 
@@ -9,53 +9,53 @@ import logging
 from typing import Type
 
 from .config import list_plugins, get_plugin
-from .plugin_base import GruPlugin, PluginHealth, HealthStatus
+from .connector_base import GruConnector, ConnectorHealth, HealthStatus
 
 logger = logging.getLogger(__name__)
 
-# Registry: plugin_type → class
-_REGISTRY: dict[str, Type[GruPlugin]] = {}
+# Registry: connector type → class
+_REGISTRY: dict[str, Type[GruConnector]] = {}
 
 
-def register_plugin_type(cls: Type[GruPlugin]) -> Type[GruPlugin]:
-    """Decorator to register a plugin class by its plugin_type."""
-    _REGISTRY[cls.plugin_type.fget(None)] = cls  # type: ignore[attr-defined]
+def register_plugin_type(cls: Type[GruConnector]) -> Type[GruConnector]:
+    """Decorator to register a connector class by its connector_type."""
+    _REGISTRY[cls.connector_type.fget(None)] = cls  # type: ignore[attr-defined]
     return cls
 
 
-def get_registered_types() -> dict[str, Type[GruPlugin]]:
+def get_registered_types() -> dict[str, Type[GruConnector]]:
     return dict(_REGISTRY)
 
 
-class PluginManager:
+class ConnectorManager:
     """
-    Owns all active plugin instances.
+    Owns all active connector instances.
 
-    Instances are keyed by plugin_id (e.g. 'github-sensio').
+    Instances are keyed by connector ID (e.g. 'github-sensio').
     """
 
     def __init__(self) -> None:
-        self._plugins: dict[str, GruPlugin] = {}
-        self._health_cache: dict[str, PluginHealth] = {}
+        self._plugins: dict[str, GruConnector] = {}
+        self._health_cache: dict[str, ConnectorHealth] = {}
         self._health_task: asyncio.Task | None = None
 
-    # ── Import plugin classes so they self-register ───────────────────────────
+    # ── Import connector classes so they self-register ────────────────────────
 
     @staticmethod
     def _import_plugins() -> None:
-        from .plugins import github_plugin, copilot_plugin, azure_plugin, obsidian_plugin  # noqa: F401
+        from .connectors import github_connector, copilot_connector, azure_connector, obsidian_connector  # noqa: F401
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     async def load_all(self) -> None:
-        """Load all plugin instances from the config DB."""
+        """Load all connector instances from the config DB."""
         self._import_plugins()
         rows = await list_plugins()
         for row in rows:
             if not row.get("enabled"):
                 continue
             await self._instantiate(row["id"], row["plugin_type"], json.loads(row["config"]))
-        logger.info("Loaded %d plugin(s) from DB", len(self._plugins))
+        logger.info("Loaded %d connector(s) from DB", len(self._plugins))
         self._health_task = asyncio.create_task(self._health_loop())
 
     async def teardown_all(self) -> None:
@@ -70,29 +70,29 @@ class PluginManager:
 
     # ── Instance management ───────────────────────────────────────────────────
 
-    async def _instantiate(self, plugin_id: str, plugin_type: str, config: dict) -> GruPlugin | None:
-        cls = _REGISTRY.get(plugin_type)
+    async def _instantiate(self, plugin_id: str, connector_type: str, config: dict) -> GruConnector | None:
+        cls = _REGISTRY.get(connector_type)
         if cls is None:
-            logger.warning("Unknown plugin type %r — skipping %s", plugin_type, plugin_id)
+            logger.warning("Unknown connector type %r — skipping %s", connector_type, plugin_id)
             return None
         plugin = cls(plugin_id, config)
         try:
             await plugin.configure(config)
         except Exception as exc:
-            logger.error("Plugin %s configure() failed: %s", plugin_id, exc)
+            logger.error("Connector %s configure() failed: %s", plugin_id, exc)
         self._plugins[plugin_id] = plugin
         return plugin
 
-    async def add_plugin(self, plugin_id: str, plugin_type: str, config: dict) -> GruPlugin:
-        """Instantiate and start a new plugin (called from wizard/plugins API)."""
+    async def add_plugin(self, plugin_id: str, connector_type: str, config: dict) -> GruConnector:
+        """Instantiate and start a new connector (called from wizard/plugins API)."""
         from .config import upsert_plugin
-        await upsert_plugin(plugin_id, plugin_type, config)
-        plugin = await self._instantiate(plugin_id, plugin_type, config)
+        await upsert_plugin(plugin_id, connector_type, config)
+        plugin = await self._instantiate(plugin_id, connector_type, config)
         if plugin is None:
-            raise ValueError(f"Unknown plugin type: {plugin_type}")
+            raise ValueError(f"Unknown connector type: {connector_type}")
         return plugin
 
-    async def update_plugin(self, plugin_id: str, config: dict) -> GruPlugin:
+    async def update_plugin(self, plugin_id: str, config: dict) -> GruConnector:
         from .config import upsert_plugin, get_plugin as _get
         row = await _get(plugin_id)
         if row is None:
@@ -111,35 +111,35 @@ class PluginManager:
         await delete_plugin(plugin_id)
         self._health_cache.pop(plugin_id, None)
 
-    def get(self, plugin_id: str) -> GruPlugin | None:
+    def get(self, plugin_id: str) -> GruConnector | None:
         return self._plugins.get(plugin_id)
 
-    def get_all(self) -> list[GruPlugin]:
+    def get_all(self) -> list[GruConnector]:
         return list(self._plugins.values())
 
-    def get_by_type(self, plugin_type: str) -> list[GruPlugin]:
-        return [p for p in self._plugins.values() if p.plugin_type == plugin_type]
+    def get_by_type(self, connector_type: str) -> list[GruConnector]:
+        return [p for p in self._plugins.values() if p.connector_type == connector_type]
 
     # ── Health ────────────────────────────────────────────────────────────────
 
     async def _health_loop(self) -> None:
-        """Poll all plugins for health every 30s."""
+        """Poll all connectors for health every 30s."""
         while True:
             await asyncio.sleep(30)
             for plugin in list(self._plugins.values()):
                 try:
                     self._health_cache[plugin.plugin_id] = await plugin.health()
                 except Exception as exc:
-                    self._health_cache[plugin.plugin_id] = PluginHealth(
+                    self._health_cache[plugin.plugin_id] = ConnectorHealth(
                         status=HealthStatus.ERROR,
                         message=str(exc),
                     )
 
-    def get_health(self, plugin_id: str) -> PluginHealth:
+    def get_health(self, plugin_id: str) -> ConnectorHealth:
         return self._health_cache.get(
-            plugin_id, PluginHealth(status=HealthStatus.UNKNOWN, message="Not yet checked")
+            plugin_id, ConnectorHealth(status=HealthStatus.UNKNOWN, message="Not yet checked")
         )
 
     def needs_setup(self) -> bool:
-        """True if no plugins are configured (wizard not completed)."""
+        """True if no connectors are configured (wizard not completed)."""
         return len(self._plugins) == 0

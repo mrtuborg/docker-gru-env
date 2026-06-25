@@ -99,8 +99,8 @@ export default function Boards() {
       {boards.length === 0 && !loading ? (
         <div className="card" style={{ color:'var(--muted)', textAlign:'center', padding:48 }}>
           <div style={{ fontSize:32, marginBottom:12 }}>📋</div>
-          No boards configured yet. Connect a GitHub or Obsidian plugin to see boards here.
-          <br/><a href="/plugins" style={{ fontSize:13, color:'var(--accent)', marginTop:12, display:'inline-block' }}>Go to Plugins →</a>
+          No boards configured yet. Connect a GitHub or Obsidian connector to see boards here.
+          <br/><a href="/connectors" style={{ fontSize:13, color:'var(--accent)', marginTop:12, display:'inline-block' }}>Go to Connectors →</a>
         </div>
       ) : (
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>

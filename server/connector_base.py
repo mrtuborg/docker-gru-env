@@ -1,5 +1,5 @@
 """
-Plugin base class — all Gru Server plugins implement this interface.
+Connector base class — all Gru Server connectors implement this interface.
 """
 from __future__ import annotations
 
@@ -17,15 +17,15 @@ class HealthStatus(str, Enum):
 
 
 @dataclass
-class PluginHealth:
+class ConnectorHealth:
     status:  HealthStatus
     message: str = ""
     details: dict = field(default_factory=dict)
 
 
-class GruPlugin(ABC):
+class GruConnector(ABC):
     """
-    Base class for all Gru Server plugins.
+    Base class for all Gru Server connectors.
 
     Lifecycle:
         __init__()   → called with plugin_id + stored config dict
@@ -42,7 +42,7 @@ class GruPlugin(ABC):
 
     @property
     @abstractmethod
-    def plugin_type(self) -> str:
+    def connector_type(self) -> str:
         """Short type string: 'github', 'copilot', 'azure', 'obsidian'."""
 
     @property
@@ -77,7 +77,7 @@ class GruPlugin(ABC):
         """Apply new configuration. Called after creation and on settings save."""
 
     @abstractmethod
-    async def health(self) -> PluginHealth:
+    async def health(self) -> ConnectorHealth:
         """Return current health status. Must not raise."""
 
     @abstractmethod
@@ -92,13 +92,13 @@ class GruPlugin(ABC):
 
     async def handle_oauth_callback(self, code: str, state: str) -> dict:
         """Handle OAuth callback. Raise NotImplementedError if not supported."""
-        raise NotImplementedError(f"{self.plugin_type} does not support OAuth callbacks")
+        raise NotImplementedError(f"{self.connector_type} does not support OAuth callbacks")
 
     def to_dict(self) -> dict:
         """Serialize plugin metadata for API responses (no secrets)."""
         return {
             "id":           self.plugin_id,
-            "plugin_type":  self.plugin_type,
+            "plugin_type":  self.connector_type,
             "display_name": self.display_name,
             "description":  self.description,
             "icon":         self.icon,

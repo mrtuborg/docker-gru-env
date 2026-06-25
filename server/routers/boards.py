@@ -13,7 +13,7 @@ class WatcherAction(BaseModel):
 
 @router.get("")
 async def list_boards(request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     boards = []
     for plugin in pm.get_by_type("github"):
         boards.append({
@@ -42,11 +42,11 @@ async def list_boards(request: Request):
 async def board_columns(board_id: str, request: Request):
     """Return columns + card counts for an Obsidian board."""
     plugin_id = board_id.replace("/board", "")
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, "Board not found")
-    if plugin.plugin_type != "obsidian":
+    if plugin.connector_type != "obsidian":
         raise HTTPException(400, "Column listing is only supported for Obsidian boards")
     columns = plugin.list_columns()
     result = []

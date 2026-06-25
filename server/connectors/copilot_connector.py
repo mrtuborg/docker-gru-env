@@ -5,15 +5,15 @@ from __future__ import annotations
 
 import logging
 
-from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
+from ..connector_base import GruConnector, ConnectorHealth, HealthStatus
 
 logger = logging.getLogger(__name__)
 
 
-class CopilotPlugin(GruPlugin):
+class CopilotPlugin(GruConnector):
 
     @property
-    def plugin_type(self) -> str:
+    def connector_type(self) -> str:
         return "copilot"
 
     @property
@@ -59,7 +59,7 @@ class CopilotPlugin(GruPlugin):
     async def configure(self, config: dict) -> None:
         self._config = config
 
-    async def health(self) -> PluginHealth:
+    async def health(self) -> ConnectorHealth:
         # In server mode, check if gh copilot CLI is available
         import asyncio
         try:
@@ -71,7 +71,7 @@ class CopilotPlugin(GruPlugin):
             stdout, _ = await proc.communicate()
             if proc.returncode == 0:
                 version = stdout.decode().strip().split('\n')[0]
-                return PluginHealth(HealthStatus.HEALTHY, f"Copilot CLI available ({version})")
+                return ConnectorHealth(HealthStatus.HEALTHY, f"Copilot CLI available ({version})")
         except FileNotFoundError:
             pass
 
@@ -83,13 +83,13 @@ class CopilotPlugin(GruPlugin):
             image_name = "gru:local"
             try:
                 client.images.get(image_name)
-                return PluginHealth(HealthStatus.HEALTHY, f"Docker OK, image {image_name} present")
+                return ConnectorHealth(HealthStatus.HEALTHY, f"Docker OK, image {image_name} present")
             except Exception:
-                return PluginHealth(HealthStatus.DEGRADED, f"Image {image_name} not built")
+                return ConnectorHealth(HealthStatus.DEGRADED, f"Image {image_name} not built")
         except Exception:
             pass
 
-        return PluginHealth(HealthStatus.ERROR, "Neither gh copilot CLI nor Docker available")
+        return ConnectorHealth(HealthStatus.ERROR, "Neither gh copilot CLI nor Docker available")
 
     async def teardown(self) -> None:
         pass

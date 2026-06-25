@@ -300,9 +300,9 @@ def _parse_board_url(url: str) -> tuple[str, int]:
     return "", 0
 
 
-async def upsert_plugin(plugin_id: str, plugin_type: str, config: dict, enabled: bool = True) -> None:
+async def upsert_plugin(plugin_id: str, connector_type: str, config: dict, enabled: bool = True) -> None:
     # Parse board_url → project_owner + project_number for GitHub plugins
-    if plugin_type == "github" and config.get("board_url"):
+    if connector_type == "github" and config.get("board_url"):
         owner, number = _parse_board_url(config["board_url"])
         if owner and number:
             config = {**config, "project_owner": owner, "project_number": number}
@@ -317,7 +317,7 @@ async def upsert_plugin(plugin_id: str, plugin_type: str, config: dict, enabled:
                  config=excluded.config,
                  enabled=excluded.enabled,
                  updated_at=excluded.updated_at""",
-            (plugin_id, plugin_type, config_json, int(enabled)),
+            (plugin_id, connector_type, config_json, int(enabled)),
         )
         await db.commit()
 

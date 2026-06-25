@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { CheckCircle2, GitBranch, Bot, Cloud, FileText, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react'
-import PluginConfigForm from '../components/PluginConfigForm'
+import ConnectorConfigForm from '../components/ConnectorConfigForm'
 import OAuthModal from '../components/OAuthModal'
 
 const PLUGIN_TYPES = [
@@ -14,8 +14,8 @@ interface WizardProps { onComplete: () => void }
 
 // Auth flow queue item
 interface AuthFlowItem {
-  pluginId: string
-  pluginType: string
+  connectorId: string
+  connectorType: string
   flow: 'device' | 'manifest'
 }
 
@@ -40,10 +40,10 @@ export default function Wizard({ onComplete }: WizardProps) {
       .catch(() => {}) // keep defaults on error
   }, [])
 
-  const stepLabels = ['Welcome', 'Plugins', ...(selected.length > 0 ? ['Configure'] : []), 'Done']
+  const stepLabels = ['Welcome', 'Connectors', ...(selected.length > 0 ? ['Configure'] : []), 'Done']
   const visualStep = step === 0 ? 0 : step === 1 ? 1 : step === 2 && selected.length > 0 ? 2 : stepLabels.length - 1
 
-  const togglePlugin = (id: string) =>
+  const toggleConnector = (id: string) =>
     setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id])
 
   const goToConfigure = () => { setConfigStep(0); setStep(2) }
@@ -51,8 +51,8 @@ export default function Wizard({ onComplete }: WizardProps) {
   const saveAndFinish = async () => {
     setSaving(true); setError(null)
 
-    const storeSecret = async (pluginId: string, key: string, value: string) => {
-      await fetch(`/api/plugins/${pluginId}/auth/secret`, {
+    const storeSecret = async (connectorId: string, key: string, value: string) => {
+      await fetch(`/api/plugins/${connectorId}/auth/secret`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ key, value }),
@@ -60,45 +60,45 @@ export default function Wizard({ onComplete }: WizardProps) {
     }
 
     try {
-      const pluginIds: Record<string, string> = {}
+      const connectorIds: Record<string, string> = {}
       for (const [i, typeId] of selected.entries()) {
         const cfg = configs[typeId] || {}
         const { token, ...rest } = cfg as any
-        const pluginId = `${typeId}-${i === 0 ? 'main' : i}`
-        pluginIds[typeId] = pluginId
+        const connectorId = `${typeId}-${i === 0 ? 'main' : i}`
+        connectorIds[typeId] = connectorId
         const createResp = await fetch('/api/plugins', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: pluginId, plugin_type: typeId, config: rest }),
+          body: JSON.stringify({ id: connectorId, plugin_type: typeId, config: rest }),
         })
         if (!createResp.ok) {
           const d = await createResp.json()
-          throw new Error(d.detail || `Failed to create ${typeId} plugin`)
+          throw new Error(d.detail || `Failed to create ${typeId} connector`)
         }
         // Store credentials in vault (never in config)
-        if (token) await storeSecret(pluginId, 'token', token)
+        if (token) await storeSecret(connectorId, 'token', token)
 
-        fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
+        fetch(`/api/plugins/${connectorId}/health`).catch(() => {})
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
 
-      // Check which plugins need browser-based OAuth
+      // Check which connectors need browser-based OAuth
       const pendingAuth: AuthFlowItem[] = []
       for (const typeId of selected) {
-        const pluginId = pluginIds[typeId]
+        const connectorId = connectorIds[typeId]
         const cfg = configs[typeId] || {}
 
         if (typeId === 'github') {
           // Skip if user already provided a PAT
           if (cfg.token) continue
-          const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
+          const statusResp = await fetch(`/api/plugins/${connectorId}/auth/status`)
           if (!statusResp.ok) continue
           const authStatus = await statusResp.json()
           if (authStatus.has_token) continue
           if (authStatus.needs_manifest) {
-            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
+            pendingAuth.push({ connectorId, connectorType: typeId, flow: 'manifest' })
           } else if (authStatus.has_client_id) {
-            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+            pendingAuth.push({ connectorId, connectorType: typeId, flow: 'device' })
           }
         }
         // Azure uses az CLI credentials — no browser OAuth needed
@@ -107,7 +107,7 @@ export default function Wizard({ onComplete }: WizardProps) {
       if (pendingAuth.length > 0) {
         const [first, ...rest] = pendingAuth
         if (first.flow === 'manifest') {
-          window.location.href = `/api/plugins/${first.pluginId}/auth/manifest/register`
+          window.location.href = `/api/plugins/${first.connectorId}/auth/manifest/register`
           return
         }
         setAuthQueue(rest)
@@ -126,7 +126,7 @@ export default function Wizard({ onComplete }: WizardProps) {
     if (authQueue.length > 0) {
       const [next, ...rest] = authQueue
       if (next.flow === 'manifest') {
-        window.location.href = `/api/plugins/${next.pluginId}/auth/manifest/register`
+        window.location.href = `/api/plugins/${next.connectorId}/auth/manifest/register`
         return
       }
       setAuthQueue(rest)
@@ -178,10 +178,10 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* STEP 1: Select plugins */}
+        {/* STEP 1: Select connectors */}
         {step === 1 && (
           <div>
-            <h2 style={{ fontSize:18, fontWeight:700, marginBottom:4 }}>Connect Plugins</h2>
+            <h2 style={{ fontSize:18, fontWeight:700, marginBottom:4 }}>Connectors</h2>
             <p style={{ color:'var(--muted)', marginBottom:20, fontSize:13 }}>Select the tools you want to connect. You can add more later.</p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:24 }}>
               {PLUGIN_TYPES.filter(({ id }) => availableTypes.has(id)).map(({ id, name, icon: Icon, color, desc }) => {
@@ -189,7 +189,7 @@ export default function Wizard({ onComplete }: WizardProps) {
                 return (
                   <div key={id}
                     className={'card card-interactive' + (active ? ' card-active' : '')}
-                    onClick={() => togglePlugin(id)}
+                    onClick={() => toggleConnector(id)}
                     style={{ position:'relative', cursor:'pointer' }}
                   >
                     {active && <div style={{ position:'absolute', top:10, right:10 }}><CheckCircle2 size={16} color="var(--green)"/></div>}
@@ -211,7 +211,7 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* STEP 2: Configure each plugin */}
+        {/* STEP 2: Configure each connector */}
         {step === 2 && currentTypeMeta && (
           <div>
             <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20 }}>
@@ -221,7 +221,7 @@ export default function Wizard({ onComplete }: WizardProps) {
               <div>
                 <h2 style={{ fontSize:17, fontWeight:700, marginBottom:2 }}>Connect {currentTypeMeta.name}</h2>
                 <div style={{ fontSize:11, color:'var(--muted)' }}>
-                  Step {configStep + 1} of {selected.length} — configure details later in plugin settings
+                  Step {configStep + 1} of {selected.length} — configure details later in connector settings
                   {selected.length > 1 && (
                     <span style={{ marginLeft:8 }}>
                       {selected.map((id, i) => (
@@ -236,9 +236,9 @@ export default function Wizard({ onComplete }: WizardProps) {
               </div>
             </div>
 
-            <PluginConfigForm
+            <ConnectorConfigForm
               key={currentTypeMeta.id}
-              pluginType={currentTypeMeta.id}
+              connectorType={currentTypeMeta.id}
               initialValues={configs[currentTypeMeta.id] || {}}
               onChange={vals => setConfigs(c => ({ ...c, [currentTypeMeta.id]: vals }))}
               phase="wizard"
@@ -252,7 +252,7 @@ export default function Wizard({ onComplete }: WizardProps) {
               </button>
               {configStep < selected.length - 1 ? (
                 <button className="btn btn-primary" onClick={() => setConfigStep(i => i + 1)}>
-                  Next Plugin <ChevronRight size={16}/>
+                  Next Connector <ChevronRight size={16}/>
                 </button>
               ) : (
                 <button className="btn btn-primary" onClick={saveAndFinish} disabled={saving}>
@@ -268,12 +268,12 @@ export default function Wizard({ onComplete }: WizardProps) {
           <div style={{ textAlign:'center' }}>
             <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
-              {selected.length > 0 ? 'Plugins Configured!' : 'Ready to Launch'}
+              {selected.length > 0 ? 'Connectors Configured!' : 'Ready to Launch'}
             </h2>
             <p style={{ color:'var(--muted)', marginBottom:8, lineHeight:1.6 }}>
               {selected.length > 0
-                ? <>Your <strong>{selected.length} plugin{selected.length > 1 ? 's' : ''}</strong> {selected.length > 1 ? 'have' : 'has'} been saved successfully.</>
-                : <>Head to <strong>Plugins</strong> to add integrations later.</>
+                ? <>Your <strong>{selected.length} connector{selected.length > 1 ? 's' : ''}</strong> {selected.length > 1 ? 'have' : 'has'} been saved successfully.</>
+                : <>Head to <strong>Connectors</strong> to add integrations later.</>
               }
             </p>
             <p style={{ color:'var(--muted)', marginBottom:24, fontSize:12 }}>
@@ -285,15 +285,15 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* OAuth Device Flow — shown for each plugin needing browser auth */}
+        {/* OAuth Device Flow — shown for each connector needing browser auth */}
         {step === 3 && currentAuth && (
           <div>
             <div style={{ fontSize:12, color:'var(--muted)', marginBottom:12, textAlign:'center' }}>
-              Authorizing {currentAuth.pluginType === 'github' ? '🔗 GitHub' : '☁️ Azure'}
+              Authorizing {currentAuth.connectorType === 'github' ? '🔗 GitHub' : '☁️ Azure'}
               {authQueue.length > 0 && ` (${authQueue.length + 1} remaining)`}
             </div>
             <OAuthModal
-              pluginId={currentAuth.pluginId}
+              connectorId={currentAuth.connectorId}
               onClose={handleAuthClose}
             />
           </div>

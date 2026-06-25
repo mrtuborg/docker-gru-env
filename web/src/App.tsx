@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
-import Plugins from './pages/Plugins'
+import Connectors from './pages/Connectors'
 import Boards from './pages/Boards'
 import Pipelines from './pages/Pipelines'
 import PipelineEditor from './pages/PipelineEditor'
@@ -125,7 +125,7 @@ function AppShell() {
           {/* Nav */}
           <nav style={{ flex: 1, display:'flex', flexDirection:'column', gap:2 }}>
             <NavLink to="/"         onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')} end><LayoutDashboard size={16}/>Dashboard</NavLink>
-            <NavLink to="/plugins"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Plug size={16}/>Plugins</NavLink>
+            <NavLink to="/connectors"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Plug size={16}/>Connectors</NavLink>
             <NavLink to="/boards"     onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Columns3 size={16}/>Boards</NavLink>
             <NavLink to="/pipelines" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Workflow size={16}/>Pipelines</NavLink>
             <NavLink to="/agents"    onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Bot size={16}/>Agents</NavLink>
@@ -141,7 +141,7 @@ function AppShell() {
         <main style={{ height:'100%', overflow:'auto', padding:24, maxWidth:1200, margin:'0 auto', width:'100%', boxSizing:'border-box' }}>
           <Routes>
             <Route path="/"         element={<Dashboard />} />
-            <Route path="/plugins"  element={<Plugins />} />
+            <Route path="/connectors"  element={<Connectors />} />
             <Route path="/boards"        element={<Boards />} />
             <Route path="/pipelines"     element={<Pipelines />} />
             <Route path="/pipelines/:id" element={<PipelineEditor />} />

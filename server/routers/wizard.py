@@ -8,7 +8,7 @@ router = APIRouter()
 
 @router.get("/status")
 async def wizard_status(request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     available_types = [
         {"id": "github",   "name": "GitHub",          "icon": "Github",   "description": "Project board watcher, cost reporting, and Copilot attribution"},
         {"id": "copilot",  "name": "GitHub Copilot",  "icon": "Bot",      "description": "Interactive and automated Copilot CLI sessions with cost tracking"},

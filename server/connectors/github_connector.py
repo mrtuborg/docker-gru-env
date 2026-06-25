@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 import httpx
 
-from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
+from ..connector_base import GruConnector, ConnectorHealth, HealthStatus
 from ..runtime import server_url
 from ..vault import load_secret, store_secret
 
@@ -27,10 +27,10 @@ _APP_CLIENT_ID_KEY = "app_client_id"
 _APP_CLIENT_SECRET_KEY = "app_client_secret"
 
 
-class GitHubPlugin(GruPlugin):
+class GitHubPlugin(GruConnector):
 
     @property
-    def plugin_type(self) -> str:
+    def connector_type(self) -> str:
         return "github"
 
     @property
@@ -85,10 +85,10 @@ class GitHubPlugin(GruPlugin):
         self._config = config
         self._token: Optional[str] = await load_secret(self.plugin_id, "token")
 
-    async def health(self) -> PluginHealth:
+    async def health(self) -> ConnectorHealth:
         token = await load_secret(self.plugin_id, "token")
         if not token:
-            return PluginHealth(
+            return ConnectorHealth(
                 HealthStatus.ERROR,
                 "Not authenticated — click Authorize to sign in via browser",
                 {"needs_auth": True},
@@ -101,15 +101,15 @@ class GitHubPlugin(GruPlugin):
                 resp = await client.get(url, headers={"Authorization": f"Bearer {token}"})
             if resp.status_code == 200:
                 login = resp.json().get("login", "?")
-                return PluginHealth(HealthStatus.HEALTHY, f"Authenticated as @{login}")
+                return ConnectorHealth(HealthStatus.HEALTHY, f"Authenticated as @{login}")
             elif resp.status_code == 401:
-                return PluginHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser")
+                return ConnectorHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser")
             else:
-                return PluginHealth(HealthStatus.DEGRADED, f"Unexpected status {resp.status_code}")
+                return ConnectorHealth(HealthStatus.DEGRADED, f"Unexpected status {resp.status_code}")
         except httpx.ConnectError:
-            return PluginHealth(HealthStatus.ERROR, f"Cannot reach {host}")
+            return ConnectorHealth(HealthStatus.ERROR, f"Cannot reach {host}")
         except Exception as exc:
-            return PluginHealth(HealthStatus.ERROR, str(exc))
+            return ConnectorHealth(HealthStatus.ERROR, str(exc))
 
     async def teardown(self) -> None:
         pass

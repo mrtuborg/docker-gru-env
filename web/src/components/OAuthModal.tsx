@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Check, X, ExternalLink } from 'lucide-react'
 
-interface OAuthModalProps { pluginId: string; onClose: (err?: string) => void; inline?: boolean }
+interface OAuthModalProps { connectorId: string; onClose: (err?: string) => void; inline?: boolean }
 
-export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProps) {
+export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalProps) {
   const [flowData, setFlowData] = useState<any>(null)
   const [status, setStatus] = useState<'loading'|'waiting'|'success'|'error'>('loading')
   const [message, setMessage] = useState('')
@@ -12,7 +12,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
-    fetch(`/api/plugins/${pluginId}/auth/device/start`, { method:'POST' })
+    fetch(`/api/plugins/${connectorId}/auth/device/start`, { method:'POST' })
       .then(async r => {
         const d = await r.json()
         if (!r.ok) {
@@ -25,7 +25,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
         setCountdown(d.expires_in || 900)
         // Start polling
         pollRef.current = setInterval(async () => {
-          const r = await fetch(`/api/plugins/${pluginId}/auth/device/poll`, { method:'POST' })
+          const r = await fetch(`/api/plugins/${connectorId}/auth/device/poll`, { method:'POST' })
           const result = await r.json()
           if (result.granted) {
             clearInterval(pollRef.current!)
@@ -40,7 +40,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
       })
       .catch(e => { setStatus('error'); setMessage(String(e)) })
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [pluginId])
+  }, [connectorId])
 
   // Countdown timer
   useEffect(() => {
@@ -61,7 +61,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
   const content = (
       <div className="modal-card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-          <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize Plugin</div>
+          <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize Connector</div>
           <button className="btn btn-ghost" style={{ padding:'4px 8px' }} onClick={() => onClose()}><X size={16}/></button>
         </div>
 
@@ -127,13 +127,13 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
               {message?.includes('not enabled') && (
                 <button className="btn btn-primary" onClick={() => {
                   setStatus('loading'); setMessage('')
-                  fetch(`/api/plugins/${pluginId}/auth/device/start`, { method:'POST' })
+                  fetch(`/api/plugins/${connectorId}/auth/device/start`, { method:'POST' })
                     .then(async r => {
                       const d = await r.json()
                       if (!r.ok) { setStatus('error'); setMessage(d.detail || 'Failed'); return }
                       setFlowData(d); setStatus('waiting'); setCountdown(d.expires_in || 900)
                       pollRef.current = setInterval(async () => {
-                        const r2 = await fetch(`/api/plugins/${pluginId}/auth/device/poll`, { method:'POST' })
+                        const r2 = await fetch(`/api/plugins/${connectorId}/auth/device/poll`, { method:'POST' })
                         const res = await r2.json()
                         if (res.granted) { clearInterval(pollRef.current!); setStatus('success'); setTimeout(() => onClose(), 1500) }
                         else if (!r2.ok) { clearInterval(pollRef.current!); setStatus('error'); setMessage(res.detail || 'Failed') }

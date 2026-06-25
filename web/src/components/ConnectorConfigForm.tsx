@@ -152,15 +152,15 @@ function ModelList({ value, onChange }: { value: {model:string;priority:number}[
 }
 
 interface Props {
-  pluginType: string
+  connectorType: string
   initialValues?: Record<string, any>
   onChange: (values: Record<string, any>) => void
   /** 'wizard' shows only connection/auth fields; 'settings' (default) shows all fields */
   phase?: 'wizard' | 'settings'
 }
 
-export default function PluginConfigForm({ pluginType, initialValues = {}, onChange, phase = 'settings' }: Props) {
-  const allFields = PLUGIN_FIELDS[pluginType] || []
+export default function ConnectorConfigForm({ connectorType, initialValues = {}, onChange, phase = 'settings' }: Props) {
+  const allFields = PLUGIN_FIELDS[connectorType] || []
   const fields = phase === 'wizard' ? allFields.filter(f => f.wizard) : allFields
   const mkDefaults = () => {
     const d: Record<string, any> = {}
@@ -173,7 +173,7 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
   const [values, setValues] = useState<Record<string, any>>(mkDefaults)
   const [showPw, setShowPw] = useState<Record<string, boolean>>({})
 
-  // Emit defaults to parent on mount (and when pluginType changes via key)
+  // Emit defaults to parent on mount (and when connectorType changes via key)
   useEffect(() => {
     onChange(values)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps

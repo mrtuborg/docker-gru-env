@@ -1,4 +1,4 @@
-"""Plugins router — CRUD, health, OAuth flows, GitHub App Manifest registration."""
+"""Connectors router — CRUD, health, OAuth flows, GitHub App Manifest registration."""
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 from .auth import register_manifest_state
-from ..plugins.azure_plugin import azure_available
+from ..connectors.azure_connector import azure_available
 
 router = APIRouter()
 
@@ -52,7 +52,7 @@ class StoreSecretRequest(BaseModel):
 
 @router.get("")
 async def list_plugins(request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     result = []
     for plugin in pm.get_all():
         health = pm.get_health(plugin.plugin_id)
@@ -62,7 +62,7 @@ async def list_plugins(request: Request):
 
 @router.post("", status_code=201)
 async def create_plugin(body: CreatePluginRequest, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     if pm.get(body.id):
         raise HTTPException(409, f"Plugin '{body.id}' already exists")
     try:
@@ -76,7 +76,7 @@ async def create_plugin(body: CreatePluginRequest, request: Request):
 
 @router.get("/{plugin_id}")
 async def get_plugin(plugin_id: str, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -87,7 +87,7 @@ async def get_plugin(plugin_id: str, request: Request):
 
 @router.put("/{plugin_id}")
 async def update_plugin(plugin_id: str, body: UpdatePluginRequest, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     try:
         plugin = await pm.update_plugin(plugin_id, body.config)
     except KeyError:
@@ -97,7 +97,7 @@ async def update_plugin(plugin_id: str, body: UpdatePluginRequest, request: Requ
 
 @router.delete("/{plugin_id}", status_code=204)
 async def delete_plugin(plugin_id: str, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     await pm.remove_plugin(plugin_id)
@@ -105,7 +105,7 @@ async def delete_plugin(plugin_id: str, request: Request):
 
 @router.get("/{plugin_id}/health")
 async def plugin_health(plugin_id: str, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -116,7 +116,7 @@ async def plugin_health(plugin_id: str, request: Request):
 
 @router.get("/{plugin_id}/schema")
 async def plugin_schema(plugin_id: str, request: Request):
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -132,7 +132,7 @@ async def auth_status(plugin_id: str, request: Request):
     For GitHub: { has_token, has_client_id, needs_manifest, host }
     For Azure: { has_token, needs_auth }
     """
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -154,7 +154,7 @@ _pending_flows: dict[str, dict] = {}
 @router.post("/{plugin_id}/auth/device/start")
 async def start_device_flow(plugin_id: str, request: Request):
     """Start OAuth device flow for GitHub or Azure. Returns user_code + verification_uri."""
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -178,7 +178,7 @@ async def start_device_flow(plugin_id: str, request: Request):
 @router.post("/{plugin_id}/auth/device/poll")
 async def poll_device_flow(plugin_id: str, request: Request):
     """Poll for OAuth token (GitHub or Azure). Returns {granted: bool, message: str}."""
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
@@ -200,7 +200,7 @@ async def poll_device_flow(plugin_id: str, request: Request):
 async def store_pat(plugin_id: str, body: StorePATRequest, request: Request):
     """Store a Personal Access Token directly."""
     from ..vault import store_secret
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     await store_secret(plugin_id, "token", body.token)
@@ -211,7 +211,7 @@ async def store_pat(plugin_id: str, body: StorePATRequest, request: Request):
 async def store_secret_endpoint(plugin_id: str, body: StoreSecretRequest, request: Request):
     """Store a named secret in the vault (e.g. sas_token, client_secret)."""
     from ..vault import store_secret
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     await store_secret(plugin_id, body.key, body.value)
@@ -222,7 +222,7 @@ async def store_secret_endpoint(plugin_id: str, body: StoreSecretRequest, reques
 async def list_credentials(plugin_id: str, request: Request):
     """List credential keys (no values) for a plugin."""
     from ..vault import list_secret_keys
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     return await list_secret_keys(plugin_id)
@@ -240,7 +240,7 @@ async def manifest_register(plugin_id: str, request: Request):
     Serve an HTML page that auto-submits the GitHub App manifest form.
     This redirects the user's browser to GitHub to create the OAuth App.
     """
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")

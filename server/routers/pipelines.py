@@ -284,7 +284,7 @@ async def fetch_board_columns(
     request: Request,
 ):
     """Fetch board column names from GitHub Projects v2 via GraphQL."""
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")

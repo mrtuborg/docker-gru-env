@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Save, Upload, Download, Loader2, AlertTriangle } from 'lucide-react'
-import PluginConfigForm from '../components/PluginConfigForm'
+import ConnectorConfigForm from '../components/ConnectorConfigForm'
 
 export default function SettingsPage() {
   const [settings, setSettings] = useState<any>(null)
@@ -63,7 +63,7 @@ export default function SettingsPage() {
       const r = await fetch('/api/settings/import', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ yaml: importYaml }) })
       const d = await r.json()
       if (!r.ok) throw new Error(d.detail || 'Import failed')
-      setImportMsg({ ok: true, text: `Imported: ${d.plugins_created} plugin(s) created` })
+      setImportMsg({ ok: true, text: `Imported: ${d.connectors_created} connector(s) created` })
       setImportYaml('')
     } catch(e: any) {
       setImportMsg({ ok: false, text: e.message })
@@ -118,7 +118,7 @@ export default function SettingsPage() {
       <section className="card" style={{ marginBottom:20 }}>
         <div className="section-label" style={{ marginBottom:8 }}>Export Configuration</div>
         <p style={{ color:'var(--muted)', fontSize:13, marginBottom:14 }}>
-          Download current plugin configuration as a <code style={{ fontFamily:'monospace', fontSize:11, background:'var(--surface2)', padding:'1px 5px', borderRadius:3 }}>config.yml</code> file compatible with the CLI mode.
+          Download current connector configuration as a <code style={{ fontFamily:'monospace', fontSize:11, background:'var(--surface2)', padding:'1px 5px', borderRadius:3 }}>config.yml</code> file compatible with the CLI mode.
         </p>
         <button className="btn btn-secondary" onClick={exportYaml}>
           <Download size={13}/> Download config.yml
@@ -129,7 +129,7 @@ export default function SettingsPage() {
       <section className="card" style={{ marginBottom:20 }}>
         <div className="section-label" style={{ marginBottom:8 }}>Import from config.yml</div>
         <p style={{ color:'var(--muted)', fontSize:13, marginBottom:14 }}>
-          Paste an existing <code style={{ fontFamily:'monospace', fontSize:11, background:'var(--surface2)', padding:'1px 5px', borderRadius:3 }}>.gru/config.yml</code> to create plugins from it.
+          Paste an existing <code style={{ fontFamily:'monospace', fontSize:11, background:'var(--surface2)', padding:'1px 5px', borderRadius:3 }}>.gru/config.yml</code> to create connectors from it.
         </p>
         <input type="file" accept=".yml,.yaml" ref={fileRef} onChange={handleFileUpload} style={{ display:'none' }}/>
         <button className="btn btn-ghost" style={{ marginBottom:10, fontSize:12 }} onClick={() => fileRef.current?.click()}>
@@ -159,7 +159,7 @@ export default function SettingsPage() {
         <p style={{ color:'var(--muted)', fontSize:13, marginBottom:16 }}>
           Controls how Copilot sessions are run inside Docker containers.
         </p>
-        <PluginConfigForm pluginType="docker" initialValues={dockerConfig} onChange={setDockerConfig}/>
+        <ConnectorConfigForm connectorType="docker" initialValues={dockerConfig} onChange={setDockerConfig}/>
         <div style={{ display:'flex', alignItems:'center', gap:10, marginTop:16 }}>
           <button className="btn btn-primary" onClick={saveDockerSettings} disabled={dockerSaving}>
             {dockerSaving ? <><Loader2 size={13} className="spin"/>Saving…</> : <><Save size={13}/>Save</>}
@@ -172,7 +172,7 @@ export default function SettingsPage() {
       <section className="card" style={{ borderColor:'var(--red)' }}>
         <div className="section-label" style={{ marginBottom:8, color:'var(--red)' }}>Danger Zone</div>
         <p style={{ color:'var(--muted)', fontSize:13, marginBottom:14 }}>
-          Reset the setup wizard. This does <strong>not</strong> delete plugins — only marks setup as incomplete so the wizard runs again on next visit.
+          Reset the setup wizard. This does <strong>not</strong> delete connectors — only marks setup as incomplete so the wizard runs again on next visit.
         </p>
         <button className="btn btn-danger" onClick={async () => {
           if (!confirm('Reset wizard state?')) return

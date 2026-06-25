@@ -35,7 +35,7 @@ async def manifest_callback(code: str, state: str, request: Request):
     if not plugin_id:
         raise HTTPException(400, "Invalid or expired state parameter")
 
-    pm = request.app.state.plugins
+    pm = request.app.state.connectors
     plugin = pm.get(plugin_id)
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")

@@ -88,14 +88,14 @@ export default function PipelineEditor() {
   const [pipeline, setPipeline] = useState<PipelineData | null>(null)
   const [selectedStage, setSelectedStage] = useState<number>(-1)
   const [saving, setSaving] = useState(false)
-  const [plugins, setPlugins] = useState<any[]>([])
+  const [connectors, setConnectors] = useState<any[]>([])
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [fetchingColumns, setFetchingColumns] = useState(false)
   const [dirty, setDirty] = useState(false)
 
   useEffect(() => {
-    fetch('/api/plugins').then(r => r.json()).then(setPlugins).catch(() => {})
+    fetch('/api/plugins').then(r => r.json()).then(setConnectors).catch(() => {})
     fetch('/api/agents').then(r => r.json()).then(setAgents).catch(() => {})
 
     if (isNew) {
@@ -206,7 +206,7 @@ export default function PipelineEditor() {
     ? pipeline.stages[selectedStage]
     : null
 
-  const githubPlugins = plugins.filter(p => p.plugin_type === 'github')
+  const githubConnectors = connectors.filter(p => p.plugin_type === 'github')
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 56px - 48px)' }}>
@@ -246,11 +246,11 @@ export default function PipelineEditor() {
           {/* Board connection */}
           <div className="section-label" style={{ marginTop:20 }}>Board Connection</div>
           <div style={{ marginBottom:12 }}>
-            <label className="form-label">Plugin</label>
+            <label className="form-label">Connector</label>
             <select className="form-input" value={pipeline.plugin_id}
               onChange={e => update({ plugin_id: e.target.value })}>
-              <option value="">Select plugin…</option>
-              {githubPlugins.map(p => (
+              <option value="">Select connector…</option>
+              {githubConnectors.map(p => (
                 <option key={p.id} value={p.id}>{p.display_name || p.id}</option>
               ))}
             </select>

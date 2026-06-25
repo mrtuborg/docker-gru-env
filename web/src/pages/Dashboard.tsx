@@ -6,9 +6,9 @@ import HealthBadge from '../components/HealthBadge'
 function OverallHealthBanner({ status }: { status: string }) {
   const cfg = {
     healthy:  { bg:'color-mix(in srgb, var(--green) 12%, transparent)', border:'var(--green)', icon: <CheckCircle2 size={16} color="var(--green)"/>, text:'All systems operational' },
-    degraded: { bg:'color-mix(in srgb, var(--yellow) 12%, transparent)', border:'var(--yellow)', icon: <AlertTriangle size={16} color="var(--yellow)"/>, text:'Some plugins need attention' },
-    error:    { bg:'color-mix(in srgb, var(--red) 12%, transparent)', border:'var(--red)', icon: <AlertTriangle size={16} color="var(--red)"/>, text:'One or more plugins are failing' },
-    unknown:  { bg:'var(--surface2)', border:'var(--border)', icon: <Loader2 size={16} color="var(--muted)"/>, text:'Checking plugin health…' },
+    degraded: { bg:'color-mix(in srgb, var(--yellow) 12%, transparent)', border:'var(--yellow)', icon: <AlertTriangle size={16} color="var(--yellow)"/>, text:'Some connectors need attention' },
+    error:    { bg:'color-mix(in srgb, var(--red) 12%, transparent)', border:'var(--red)', icon: <AlertTriangle size={16} color="var(--red)"/>, text:'One or more connectors are failing' },
+    unknown:  { bg:'var(--surface2)', border:'var(--border)', icon: <Loader2 size={16} color="var(--muted)"/>, text:'Checking connector health…' },
   }[status] ?? { bg:'var(--surface2)', border:'var(--border)', icon: null, text: status }
 
   return (
@@ -58,22 +58,22 @@ export default function Dashboard() {
 
       {data?.needs_setup && (
         <div className="card" style={{ borderColor:'var(--accent)', marginBottom:24 }}>
-          <div style={{ fontWeight:600, marginBottom:6 }}>🧪 No plugins connected yet</div>
+          <div style={{ fontWeight:600, marginBottom:6 }}>🧪 No connectors connected yet</div>
           <div style={{ color:'var(--muted)', marginBottom:14, fontSize:13 }}>
-            Connect your first plugin to start watching project boards and running Copilot sessions.
+            Connect your first connector to start watching project boards and running Copilot sessions.
           </div>
           <a href="/wizard" className="btn btn-primary" style={{ display:'inline-flex' }}>Start Setup Wizard →</a>
         </div>
       )}
 
-      {/* Plugin health grid */}
-      {data?.plugins?.length > 0 && (
+      {/* Connector health grid */}
+      {data?.connectors?.length > 0 && (
         <section style={{ marginBottom:32 }}>
           <div className="section-label" style={{ display:'flex', alignItems:'center', gap:6, marginBottom:12 }}>
-            <Plug size={13}/>Plugins
+            <Plug size={13}/>Connectors
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
-            {data.plugins.map((p: any) => (
+            {data.connectors.map((p: any) => (
               <div key={p.id} className="card" style={{ padding:'16px 16px 12px' }}>
                 <div style={{ fontSize:22, marginBottom:6 }}>
                   {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : '📝'}

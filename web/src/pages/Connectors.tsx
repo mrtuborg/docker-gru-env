@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { GitBranch, Bot, Cloud, FileText, Plus, RefreshCw, Pencil, Trash2, X, Save, Loader2 } from 'lucide-react'
 import HealthBadge from '../components/HealthBadge'
 import OAuthModal from '../components/OAuthModal'
-import PluginConfigForm from '../components/PluginConfigForm'
+import ConnectorConfigForm from '../components/ConnectorConfigForm'
 
 const TYPE_META: Record<string, { icon: any; color: string; label: string }> = {
   github:   { icon: GitBranch, color:'#58a6ff', label:'GitHub' },
@@ -14,25 +14,25 @@ const TYPE_META: Record<string, { icon: any; color: string; label: string }> = {
 
 const PLUGIN_TYPES = Object.entries(TYPE_META).map(([id, m]) => ({ id, ...m }))
 
-function AddPluginModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
+function AddConnectorModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [typeId, setTypeId] = useState<string | null>(null)
-  const [pluginId, setPluginId] = useState('')
+  const [connectorId, setConnectorId] = useState('')
   const [config, setConfig] = useState<Record<string, any>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const save = async () => {
-    if (!typeId || !pluginId) { setError('Plugin ID is required'); return }
+    if (!typeId || !connectorId) { setError('Connector ID is required'); return }
     setSaving(true); setError(null)
     const { token, client_secret, ...rest } = config as any
     try {
       const r = await fetch('/api/plugins', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: pluginId, plugin_type: typeId, config: rest }),
+        body: JSON.stringify({ id: connectorId, plugin_type: typeId, config: rest }),
       })
       if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Save failed') }
       if (token) {
-        await fetch(`/api/plugins/${pluginId}/credentials`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type:'pat', token }) })
+        await fetch(`/api/plugins/${connectorId}/credentials`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type:'pat', token }) })
       }
       onSaved()
     } catch(e: any) { setError(e.message) }
@@ -43,16 +43,16 @@ function AddPluginModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <div className="modal-card" style={{ maxWidth:520, width:'90%', maxHeight:'85vh', overflow:'auto' }}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-          <h2 style={{ fontSize:17, fontWeight:700 }}>Add Plugin</h2>
+          <h2 style={{ fontSize:17, fontWeight:700 }}>Add Connector</h2>
           <button className="btn btn-ghost" style={{ padding:'4px 6px' }} onClick={onClose}><X size={16}/></button>
         </div>
 
         {!typeId ? (
           <div>
-            <p style={{ color:'var(--muted)', fontSize:13, marginBottom:16 }}>Select plugin type:</p>
+            <p style={{ color:'var(--muted)', fontSize:13, marginBottom:16 }}>Select connector type:</p>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
               {PLUGIN_TYPES.map(({ id, icon: Icon, color, label }) => (
-                <div key={id} className="card card-interactive" onClick={() => { setTypeId(id); setPluginId(`${id}-${Date.now().toString(36)}`) }}
+                <div key={id} className="card card-interactive" onClick={() => { setTypeId(id); setConnectorId(`${id}-${Date.now().toString(36)}`) }}
                   style={{ cursor:'pointer', display:'flex', alignItems:'center', gap:12, padding:'12px 14px' }}>
                   <div style={{ width:32, height:32, borderRadius:6, background:`color-mix(in srgb, ${color} 15%, transparent)`, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
                     <Icon size={16} color={color}/>
@@ -65,16 +65,16 @@ function AddPluginModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         ) : (
           <div>
             <div style={{ marginBottom:16 }}>
-              <div className="form-label">Plugin ID <span style={{ color:'var(--red)' }}>*</span></div>
-              <input className="form-input" value={pluginId} onChange={e => setPluginId(e.target.value)} placeholder="e.g. github-main"/>
-              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>Unique identifier for this plugin instance</div>
+              <div className="form-label">Connector ID <span style={{ color:'var(--red)' }}>*</span></div>
+              <input className="form-input" value={connectorId} onChange={e => setConnectorId(e.target.value)} placeholder="e.g. github-main"/>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:3 }}>Unique identifier for this connector instance</div>
             </div>
-            <PluginConfigForm pluginType={typeId} onChange={setConfig}/>
+            <ConnectorConfigForm connectorType={typeId} onChange={setConfig}/>
             {error && <div style={{ color:'var(--red)', fontSize:12, marginTop:12 }}>⚠ {error}</div>}
             <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20 }}>
               <button className="btn btn-ghost" onClick={() => setTypeId(null)}>← Change type</button>
               <button className="btn btn-primary" onClick={save} disabled={saving}>
-                {saving ? <><Loader2 size={13} className="spin"/>Saving…</> : <><Save size={13}/>Save Plugin</>}
+                {saving ? <><Loader2 size={13} className="spin"/>Saving…</> : <><Save size={13}/>Save Connector</>}
               </button>
             </div>
           </div>
@@ -84,7 +84,7 @@ function AddPluginModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   )
 }
 
-function EditPluginModal({ plugin, onClose, onSaved }: { plugin: any; onClose: () => void; onSaved: () => void }) {
+function EditConnectorModal({ plugin, onClose, onSaved }: { plugin: any; onClose: () => void; onSaved: () => void }) {
   const [config, setConfig] = useState<Record<string, any>>(plugin.config || {})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -119,7 +119,7 @@ function EditPluginModal({ plugin, onClose, onSaved }: { plugin: any; onClose: (
           </div>
           <button className="btn btn-ghost" style={{ padding:'4px 6px' }} onClick={onClose}><X size={16}/></button>
         </div>
-        <PluginConfigForm pluginType={plugin.plugin_type} initialValues={config} onChange={setConfig}/>
+        <ConnectorConfigForm connectorType={plugin.plugin_type} initialValues={config} onChange={setConfig}/>
         {error && <div style={{ color:'var(--red)', fontSize:12, marginTop:12 }}>⚠ {error}</div>}
         <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:20 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -132,17 +132,17 @@ function EditPluginModal({ plugin, onClose, onSaved }: { plugin: any; onClose: (
   )
 }
 
-export default function Plugins() {
+export default function Connectors() {
   const navigate = useNavigate()
-  const [plugins, setPlugins] = useState<any[]>([])
+  const [connectors, setConnectors] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [oauthPlugin, setOauthPlugin] = useState<string | null>(null)
+  const [oauthConnector, setOauthConnector] = useState<string | null>(null)
   const [addOpen, setAddOpen] = useState(false)
-  const [editPlugin, setEditPlugin] = useState<any | null>(null)
+  const [editConnector, setEditConnector] = useState<any | null>(null)
 
   const load = () => {
     setLoading(true)
-    fetch('/api/plugins').then(r => r.json()).then(d => { setPlugins(d); setLoading(false) })
+    fetch('/api/plugins').then(r => r.json()).then(d => { setConnectors(d); setLoading(false) })
       .catch(() => setLoading(false))
   }
 
@@ -151,31 +151,31 @@ export default function Plugins() {
   const refreshHealth = async (id: string) => {
     const r = await fetch(`/api/plugins/${id}/health`)
     const h = await r.json()
-    setPlugins(ps => ps.map(p => p.id === id ? { ...p, health: h } : p))
+    setConnectors(ps => ps.map(p => p.id === id ? { ...p, health: h } : p))
   }
 
   const disconnect = async (id: string) => {
-    if (!confirm(`Disconnect plugin '${id}'? This cannot be undone.`)) return
+    if (!confirm(`Disconnect connector '${id}'? This cannot be undone.`)) return
     await fetch(`/api/plugins/${id}`, { method:'DELETE' })
-    setPlugins(ps => ps.filter(p => p.id !== id))
+    setConnectors(ps => ps.filter(p => p.id !== id))
   }
 
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 }}>
-        <h1 style={{ fontSize:22, fontWeight:700 }}>Plugins</h1>
+        <h1 style={{ fontSize:22, fontWeight:700 }}>Connectors</h1>
         <div style={{ display:'flex', gap:8 }}>
           <button className="btn btn-ghost" onClick={load}><RefreshCw size={14}/> Refresh</button>
-          <button className="btn btn-primary" onClick={() => setAddOpen(true)}><Plus size={14}/> Add Plugin</button>
+          <button className="btn btn-primary" onClick={() => setAddOpen(true)}><Plus size={14}/> Add Connector</button>
         </div>
       </div>
 
-      {loading && plugins.length === 0 && (
+      {loading && connectors.length === 0 && (
         <div style={{ display:'flex', gap:12, alignItems:'center', color:'var(--muted)' }}><div className="spinner"/> Loading…</div>
       )}
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:16 }}>
-        {plugins.map((p: any) => {
+        {connectors.map((p: any) => {
           const meta = TYPE_META[p.plugin_type] || { icon: Plus, color:'var(--muted)', label: p.plugin_type }
           const Icon = meta.icon
           return (
@@ -196,11 +196,11 @@ export default function Plugins() {
                 <button className="btn btn-ghost" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => refreshHealth(p.id)}>
                   <RefreshCw size={11}/> Health
                 </button>
-                <button className="btn btn-secondary" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => setEditPlugin(p)}>
+                <button className="btn btn-secondary" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => setEditConnector(p)}>
                   <Pencil size={11}/> Configure
                 </button>
                 {p.plugin_type === 'github' && (
-                  <button className="btn btn-secondary" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => setOauthPlugin(p.id)}>
+                  <button className="btn btn-secondary" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => setOauthConnector(p.id)}>
                     🔗 Authorize
                   </button>
                 )}
@@ -213,19 +213,19 @@ export default function Plugins() {
         })}
       </div>
 
-      {plugins.length === 0 && !loading && (
+      {connectors.length === 0 && !loading && (
         <div className="card" style={{ textAlign:'center', padding:48, color:'var(--muted)' }}>
           <div style={{ fontSize:32, marginBottom:12 }}>🔌</div>
-          No plugins connected yet.{' '}
+          No connectors connected yet.{' '}
           <button className="btn btn-primary" style={{ marginTop:12, display:'block', margin:'12px auto 0' }} onClick={() => navigate('/wizard')}>
             Run Setup Wizard
           </button>
         </div>
       )}
 
-      {addOpen && <AddPluginModal onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); load() }}/>}
-      {editPlugin && <EditPluginModal plugin={editPlugin} onClose={() => setEditPlugin(null)} onSaved={() => { setEditPlugin(null); load() }}/>}
-      {oauthPlugin && <OAuthModal pluginId={oauthPlugin} onClose={() => { setOauthPlugin(null); load() }}/>}
+      {addOpen && <AddConnectorModal onClose={() => setAddOpen(false)} onSaved={() => { setAddOpen(false); load() }}/>}
+      {editConnector && <EditConnectorModal plugin={editConnector} onClose={() => setEditConnector(null)} onSaved={() => { setEditConnector(null); load() }}/>}
+      {oauthConnector && <OAuthModal connectorId={oauthConnector} onClose={() => { setOauthConnector(null); load() }}/>}
     </div>
   )
 }

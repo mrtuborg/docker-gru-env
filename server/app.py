@@ -13,31 +13,31 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .config import init_db
-from .plugin_manager import PluginManager
+from .connector_manager import ConnectorManager
 from .services.pipeline_engine import PipelineEngine
-from .routers import dashboard, plugins_api, wizard, boards, sessions, settings_api, pipelines, agents, auth
+from .routers import dashboard, connectors_api, wizard, boards, sessions, settings_api, pipelines, agents, auth
 
 logger = logging.getLogger(__name__)
 
-# Singleton plugin manager, accessible across routers
-plugin_manager: PluginManager | None = None
+# Singleton connector manager, accessible across routers
+connector_manager: ConnectorManager | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start/stop server lifecycle: init DB, load plugins."""
-    global plugin_manager
+    """Start/stop server lifecycle: init DB, load connectors."""
+    global connector_manager
     logger.info("Gru Server starting…")
     await init_db()
-    plugin_manager = PluginManager()
-    await plugin_manager.load_all()
-    app.state.plugins = plugin_manager
+    connector_manager = ConnectorManager()
+    await connector_manager.load_all()
+    app.state.connectors = connector_manager
     app.state.engine = PipelineEngine()
     yield
     logger.info("Gru Server shutting down…")
     await app.state.engine.stop_all()
-    if plugin_manager:
-        await plugin_manager.teardown_all()
+    if connector_manager:
+        await connector_manager.teardown_all()
 
 
 def create_app(data_dir: Path | None = None) -> FastAPI:
@@ -61,7 +61,7 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
 
     # API routers
     app.include_router(wizard.router,       prefix="/api/wizard",   tags=["wizard"])
-    app.include_router(plugins_api.router,  prefix="/api/plugins",  tags=["plugins"])
+    app.include_router(connectors_api.router,  prefix="/api/plugins",  tags=["plugins"])
     app.include_router(dashboard.router,    prefix="/api/dashboard", tags=["dashboard"])
     app.include_router(boards.router,       prefix="/api/boards",   tags=["boards"])
     app.include_router(sessions.router,     prefix="/api/sessions", tags=["sessions"])
@@ -86,3 +86,6 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
             return FileResponse(index)
 
     return app
+
+
+app = create_app()

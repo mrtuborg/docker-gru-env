@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
+from ..connector_base import GruConnector, ConnectorHealth, HealthStatus
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +21,10 @@ def azure_available() -> bool:
     return _AZURE_DIR.exists()
 
 
-class AzurePlugin(GruPlugin):
+class AzurePlugin(GruConnector):
 
     @property
-    def plugin_type(self) -> str:
+    def connector_type(self) -> str:
         return "azure"
 
     @property
@@ -61,25 +61,25 @@ class AzurePlugin(GruPlugin):
     async def configure(self, config: dict) -> None:
         self._config = config
 
-    async def health(self) -> PluginHealth:
+    async def health(self) -> ConnectorHealth:
         if not azure_available():
-            return PluginHealth(
+            return ConnectorHealth(
                 HealthStatus.ERROR,
                 "~/.azure not mounted — restart container with -v ~/.azure:/root/.azure:ro",
             )
         storage_account = self._config.get("storage_account", "")
         if not storage_account:
-            return PluginHealth(HealthStatus.ERROR, "Storage account not configured")
+            return ConnectorHealth(HealthStatus.ERROR, "Storage account not configured")
 
         ok = await self._test_credential()
         if not ok:
-            return PluginHealth(
+            return ConnectorHealth(
                 HealthStatus.ERROR,
                 "az CLI credentials invalid or expired — run 'az login' on the host",
             )
         container = self._config.get("container", "")
         label = f"{storage_account}/{container}" if container else storage_account
-        return PluginHealth(HealthStatus.HEALTHY, f"Connected to {label}")
+        return ConnectorHealth(HealthStatus.HEALTHY, f"Connected to {label}")
 
     async def teardown(self) -> None:
         pass

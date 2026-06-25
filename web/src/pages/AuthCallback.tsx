@@ -19,7 +19,7 @@ export default function AuthCallback() {
   const [params] = useSearchParams()
   const navigate = useNavigate()
 
-  const pluginId = params.get('plugin')
+  const connectorId = params.get('plugin')
   const status = params.get('status')
   const appName = params.get('app_name')
   const host = params.get('host') || 'github.com'
@@ -31,13 +31,13 @@ export default function AuthCallback() {
 
   const appSettingsUrl = params.get('settings_url') || `https://${host}/settings/apps`
 
-  if (!pluginId) {
+  if (!connectorId) {
     return (
       <div style={{ display:'flex', alignItems:'center', justifyContent:'center', minHeight:'60vh' }}>
         <div className="modal-card" style={{ maxWidth: 420, textAlign:'center' }}>
           <AlertCircle size={36} color="var(--red)" style={{ marginBottom:12 }}/>
           <h2 style={{ fontSize:18, fontWeight:700, marginBottom:8 }}>Missing Parameters</h2>
-          <p style={{ color:'var(--muted)', marginBottom:20 }}>No plugin ID in callback URL.</p>
+          <p style={{ color:'var(--muted)', marginBottom:20 }}>No connector ID in callback URL.</p>
           <button className="btn btn-primary" onClick={() => navigate('/')}>Go to Dashboard</button>
         </div>
       </div>
@@ -110,7 +110,7 @@ export default function AuthCallback() {
 
         {phase === 'device_flow' && (
           <OAuthModal
-            pluginId={pluginId}
+            connectorId={connectorId}
             onClose={(err?: string) => {
               // If device flow was disabled, bounce back to the enable step
               if (err && err.includes('not enabled')) {
@@ -127,7 +127,7 @@ export default function AuthCallback() {
           <div style={{ textAlign:'center' }}>
             <CheckCircle2 size={48} color="var(--green)" style={{ marginBottom:16 }}/>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>Authorization Complete!</h2>
-            <p style={{ color:'var(--muted)', marginBottom:20 }}>Your GitHub plugin is fully configured.</p>
+            <p style={{ color:'var(--muted)', marginBottom:20 }}>Your GitHub connector is fully configured.</p>
             <button className="btn btn-primary" onClick={() => navigate('/')}>Go to Dashboard</button>
           </div>
         )}
@@ -137,7 +137,7 @@ export default function AuthCallback() {
             <AlertCircle size={48} color="var(--red)" style={{ marginBottom:16 }}/>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>Registration Failed</h2>
             <p style={{ color:'var(--muted)', marginBottom:20 }}>{errorMsg || 'Unknown error occurred.'}</p>
-            <button className="btn btn-primary" onClick={() => navigate('/plugins')}>Go to Plugins</button>
+            <button className="btn btn-primary" onClick={() => navigate('/connectors')}>Go to Connectors</button>
           </div>
         )}
 

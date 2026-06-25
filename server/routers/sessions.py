@@ -33,11 +33,11 @@ async def list_sessions(request: Request, limit: int = 50):
 @router.get("/cost/report")
 async def cost_report(request: Request, format: str = "json"):
     """Generate a cost report using cost-report.py."""
-    pm = request.app.state.plugins
-    github_plugins = pm.get_by_type("github")
-    if not github_plugins:
+    pm = request.app.state.connectors
+    github_connectors = pm.get_by_type("github")
+    if not github_connectors:
         raise HTTPException(400, "No GitHub plugin configured")
-    plugin = github_plugins[0]
+    plugin = github_connectors[0]
     config_flag = _build_config_flag(plugin)
     try:
         if format == "json":
@@ -53,11 +53,11 @@ async def cost_report(request: Request, format: str = "json"):
 @router.post("/cost/sync")
 async def cost_sync(request: Request):
     """Trigger cost-link + board-sync."""
-    pm = request.app.state.plugins
-    github_plugins = pm.get_by_type("github")
-    if not github_plugins:
+    pm = request.app.state.connectors
+    github_connectors = pm.get_by_type("github")
+    if not github_connectors:
         raise HTTPException(400, "No GitHub plugin configured")
-    plugin = github_plugins[0]
+    plugin = github_connectors[0]
     config_flag = _build_config_flag(plugin)
     try:
         out = _run_cost_script("cost-link.py", *config_flag, "--apply")

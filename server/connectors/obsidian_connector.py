@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
+from ..connector_base import GruConnector, ConnectorHealth, HealthStatus
 
 logger = logging.getLogger(__name__)
 
@@ -17,14 +17,14 @@ logger = logging.getLogger(__name__)
 _MD_KANBAN = Path(__file__).parents[2] / "src" / "md_kanban.py"
 
 
-class ObsidianPlugin(GruPlugin):
+class ObsidianPlugin(GruConnector):
 
     def __init__(self, plugin_id: str, config: dict) -> None:
         super().__init__(plugin_id, config)
         self._watcher_task: asyncio.Task | None = None
 
     @property
-    def plugin_type(self) -> str:
+    def connector_type(self) -> str:
         return "obsidian"
 
     @property
@@ -58,14 +58,14 @@ class ObsidianPlugin(GruPlugin):
     async def configure(self, config: dict) -> None:
         self._config = config
 
-    async def health(self) -> PluginHealth:
+    async def health(self) -> ConnectorHealth:
         board_path = Path(self._config.get("board_path", ""))
         if not board_path:
-            return PluginHealth(HealthStatus.ERROR, "No board file configured")
+            return ConnectorHealth(HealthStatus.ERROR, "No board file configured")
         if not board_path.exists():
-            return PluginHealth(HealthStatus.ERROR, f"Board file not found: {board_path}")
+            return ConnectorHealth(HealthStatus.ERROR, f"Board file not found: {board_path}")
         if not _MD_KANBAN.exists():
-            return PluginHealth(HealthStatus.ERROR, "md_kanban.py not found in src/")
+            return ConnectorHealth(HealthStatus.ERROR, "md_kanban.py not found in src/")
 
         # Quick parse check
         try:
@@ -74,15 +74,15 @@ class ObsidianPlugin(GruPlugin):
                 capture_output=True, text=True, timeout=5,
             )
             if result.returncode != 0:
-                return PluginHealth(HealthStatus.DEGRADED, f"Board parse error: {result.stderr.strip()}")
+                return ConnectorHealth(HealthStatus.DEGRADED, f"Board parse error: {result.stderr.strip()}")
             columns = [c for c in result.stdout.strip().splitlines() if c]
-            return PluginHealth(
+            return ConnectorHealth(
                 HealthStatus.HEALTHY,
                 f"Board OK — {len(columns)} column(s): {', '.join(columns)}",
                 {"columns": columns},
             )
         except Exception as exc:
-            return PluginHealth(HealthStatus.ERROR, str(exc))
+            return ConnectorHealth(HealthStatus.ERROR, str(exc))
 
     async def teardown(self) -> None:
         if self._watcher_task and not self._watcher_task.done():
