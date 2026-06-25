@@ -122,7 +122,7 @@ class GitHubPlugin(GruPlugin):
         return {
             "has_token": token is not None,
             "has_client_id": client_id is not None,
-            "needs_manifest": client_id is None and host != "github.com",
+            "needs_manifest": client_id is None,
             "host": host,
         }
 
