@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Copy, Check, X } from 'lucide-react'
+import { Copy, Check, X, ExternalLink } from 'lucide-react'
 
 interface OAuthModalProps { pluginId: string; onClose: (err?: string) => void; inline?: boolean }
 
@@ -7,7 +7,6 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
   const [flowData, setFlowData] = useState<any>(null)
   const [status, setStatus] = useState<'loading'|'waiting'|'success'|'error'>('loading')
   const [message, setMessage] = useState('')
-  const [copiedUrl, setCopiedUrl] = useState(false)
   const [copiedCode, setCopiedCode] = useState(false)
   const [countdown, setCountdown] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -76,13 +75,21 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
           <>
             <div style={{ marginBottom:16 }}>
               <div className="form-label">1. Open this URL in your browser</div>
-              <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-                <input className="form-input" readOnly value={flowData.verification_uri || ''} style={{ fontFamily:'monospace', fontSize:12 }}/>
-                <button className="btn btn-ghost" style={{ flexShrink:0, padding:'8px' }}
-                  onClick={() => copy(flowData.verification_uri, setCopiedUrl)}>
-                  {copiedUrl ? <Check size={14} color="var(--green)"/> : <Copy size={14}/>}
-                </button>
-              </div>
+              <a
+                href={flowData.verification_uri}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="form-input"
+                style={{
+                  display:'flex', alignItems:'center', gap:8,
+                  fontFamily:'monospace', fontSize:12,
+                  color:'var(--accent)', textDecoration:'none',
+                  cursor:'pointer',
+                }}
+              >
+                <ExternalLink size={13} style={{ flexShrink:0 }}/>
+                {flowData.verification_uri}
+              </a>
             </div>
             <div style={{ marginBottom:20 }}>
               <div className="form-label">2. Enter this code</div>
