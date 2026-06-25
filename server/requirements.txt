@@ -10,3 +10,4 @@ websockets>=13.0
 docker>=7.1.0
 msal>=1.31.0
 watchdog>=5.0.0
+PyJWT[crypto]>=2.8.0

@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 from typing import Any, Optional
 
 import httpx
@@ -139,7 +140,6 @@ class GitHubPlugin(GruPlugin):
             "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
             "public": True,
             "request_oauth_on_install": True,
-            "device_flow_enabled": True,
             "default_permissions": {
                 "issues": "write",
                 "pull_requests": "write",
@@ -152,7 +152,7 @@ class GitHubPlugin(GruPlugin):
     async def complete_manifest_flow(self, code: str) -> dict:
         """
         Exchange the temporary code from manifest callback for app credentials.
-        Stores client_id + client_secret in the vault.
+        Stores client_id + client_secret in the vault, then enables device flow.
         """
         host = self._config.get("host", "github.com")
         api_base = f"https://{host}/api/v3" if host != "github.com" else "https://api.github.com"
@@ -167,19 +167,52 @@ class GitHubPlugin(GruPlugin):
 
         client_id = data.get("client_id", "")
         client_secret = data.get("client_secret", "")
+        pem = data.get("pem", "")
+        app_id = data.get("id")
 
         if not client_id:
             raise ValueError("GitHub did not return a client_id")
 
         await store_secret(self.plugin_id, _APP_CLIENT_ID_KEY, client_id)
         await store_secret(self.plugin_id, _APP_CLIENT_SECRET_KEY, client_secret)
+        if pem:
+            await store_secret(self.plugin_id, "app_pem", pem)
+
+        # Enable device flow via PATCH /app (requires JWT auth as the app)
+        if pem and app_id:
+            try:
+                await self._enable_device_flow(api_base, app_id, pem)
+            except Exception as e:
+                logger.warning("Could not auto-enable device flow: %s", e)
 
         logger.info("GitHub App registered for %s: client_id=%s…", host, client_id[:8])
         return {
-            "app_id": data.get("id"),
+            "app_id": app_id,
             "app_name": data.get("name"),
             "client_id": client_id,
         }
+
+    async def _enable_device_flow(self, api_base: str, app_id: int, pem: str) -> None:
+        """Generate JWT and PATCH /app to enable device_flow_enabled."""
+        import jwt as pyjwt
+
+        now = int(time.time())
+        payload = {"iat": now - 60, "exp": now + (10 * 60), "iss": str(app_id)}
+        token = pyjwt.encode(payload, pem, algorithm="RS256")
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.patch(
+                f"{api_base}/app",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Accept": "application/vnd.github+json",
+                },
+                json={"device_flow_enabled": True},
+            )
+            if resp.status_code < 300:
+                logger.info("Device flow enabled for app %s", app_id)
+            else:
+                logger.warning("PATCH /app returned %d: %s", resp.status_code, resp.text)
 
     # ── OAuth Device Flow ─────────────────────────────────────────────────────
 
