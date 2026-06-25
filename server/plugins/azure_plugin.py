@@ -94,11 +94,13 @@ class AzurePlugin(GruPlugin):
             return False
         try:
             import asyncio
-            from azure.identity import AzureCliCredential
+            from azure.identity import DefaultAzureCredential
             from azure.storage.blob import BlobServiceClient
 
             def _check():
-                cred   = AzureCliCredential()
+                cred   = DefaultAzureCredential(exclude_environment_credential=True,
+                                                exclude_workload_identity_credential=True,
+                                                exclude_managed_identity_credential=True)
                 client = BlobServiceClient(
                     f"https://{storage_account}.blob.core.windows.net",
                     credential=cred,
