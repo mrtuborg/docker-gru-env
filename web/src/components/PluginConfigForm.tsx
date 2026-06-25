@@ -81,7 +81,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'Default blob container name.' },
     { key: '_sas_portal_link', label: '', type: 'link-button' as any, wizard: true,
       showWhen: { field: 'auth_method', value: 'sas_token' },
-      hint: 'In Azure Portal: select your storage account → "Shared access signature" in the left menu → set permissions and expiry → click "Generate SAS and connection string" → copy the SAS token.' },
+      hint: 'In Azure Portal: go to your storage account (e.g. rmeswprod) → left sidebar → "Security + networking" → "Shared access signature" → set permissions and expiry → click "Generate SAS and connection string" → copy the SAS token field.' },
     { key: 'sas_token',       label: 'SAS Token',          type: 'password', wizard: true,
       placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...',
       hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.',
