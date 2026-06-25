@@ -138,6 +138,7 @@ class GitHubPlugin(GruPlugin):
             "url": base_url,
             "hook_attributes": {"url": "https://example.com", "active": False},
             "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
+            "callback_urls": [f"{base_url}/api/auth/github/callback"],
             "public": True,
             "request_oauth_on_install": True,
             "default_permissions": {
