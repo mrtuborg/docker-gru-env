@@ -36,29 +36,36 @@ export default function Wizard({ onComplete }: WizardProps) {
         const cfg = configs[typeId] || {}
         const { token, client_secret, ...rest } = cfg as any
         const pluginId = `${typeId}-${i === 0 ? 'main' : i}`
-        await fetch('/api/plugins', {
+        const createResp = await fetch('/api/plugins', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id: pluginId, plugin_type: typeId, config: rest }),
         })
-        // Store secret separately
+        if (!createResp.ok) {
+          const d = await createResp.json()
+          throw new Error(d.detail || `Failed to create ${typeId} plugin`)
+        }
+        // Store secrets via the auth/pat endpoint
         if (token) {
-          await fetch(`/api/plugins/${pluginId}/credentials`, {
-            method: 'PUT',
+          await fetch(`/api/plugins/${pluginId}/auth/pat`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'pat', token }),
+            body: JSON.stringify({ token }),
           })
         }
         if (client_secret) {
-          await fetch(`/api/plugins/${pluginId}/credentials`, {
-            method: 'PUT',
+          await fetch(`/api/plugins/${pluginId}/auth/pat`, {
+            method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'client_secret', client_secret }),
+            body: JSON.stringify({ token: client_secret }),
           })
         }
+        // Trigger immediate health check so dashboard shows status
+        fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
-      onComplete()
+      // Show success step before redirecting
+      setStep(3)
     } catch (e: any) {
       setError(e.message || 'Failed to save configuration')
     } finally {
@@ -191,17 +198,24 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* DONE (step 3 or after skip) */}
+        {/* DONE (step 3 — shown after successful save or skip) */}
         {step === 3 && (
           <div style={{ textAlign:'center' }}>
-            <div style={{ fontSize:48, marginBottom:16 }}>✓</div>
-            <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>Ready to Launch</h2>
-            <p style={{ color:'var(--muted)', marginBottom:24, lineHeight:1.6 }}>
-              Head to <strong>Plugins</strong> to add API tokens and fine-tune each integration.
-              Use the <strong>⚙️ gear icon</strong> in the header to return here at any time.
+            <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
+            <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
+              {selected.length > 0 ? 'Plugins Configured!' : 'Ready to Launch'}
+            </h2>
+            <p style={{ color:'var(--muted)', marginBottom:8, lineHeight:1.6 }}>
+              {selected.length > 0
+                ? <>Your <strong>{selected.length} plugin{selected.length > 1 ? 's' : ''}</strong> {selected.length > 1 ? 'have' : 'has'} been saved successfully.</>
+                : <>Head to <strong>Plugins</strong> to add integrations later.</>
+              }
             </p>
-            <button className="btn btn-primary" style={{ fontSize:15, padding:'10px 28px' }} onClick={saveAndFinish} disabled={saving}>
-              {saving ? <><Loader2 size={14} className="spin"/>Saving…</> : <>🧪 Launch Gru's Lab</>}
+            <p style={{ color:'var(--muted)', marginBottom:24, fontSize:12 }}>
+              Use the <strong>⚙️ gear icon</strong> in the header to reconfigure at any time.
+            </p>
+            <button className="btn btn-primary" style={{ fontSize:15, padding:'10px 28px' }} onClick={onComplete}>
+              🧪 Open Dashboard
             </button>
           </div>
         )}
