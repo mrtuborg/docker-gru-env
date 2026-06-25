@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CheckCircle2, GitBranch, Bot, Cloud, FileText, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react'
 import PluginConfigForm from '../components/PluginConfigForm'
+import OAuthModal from '../components/OAuthModal'
 
 const PLUGIN_TYPES = [
   { id:'github',   name:'GitHub',          icon: GitBranch, color:'#58a6ff', desc:'Project board watcher, cost reporting, session attribution' },
@@ -19,6 +20,7 @@ export default function Wizard({ onComplete }: WizardProps) {
   const [configs, setConfigs] = useState<Record<string, Record<string, any>>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [oauthPluginId, setOauthPluginId] = useState<string | null>(null)
 
   const stepLabels = ['Welcome', 'Plugins', ...(selected.length > 0 ? ['Configure'] : []), 'Done']
   // visual step index: 0=welcome, 1=select, 2=configure (if any), 3=done
@@ -32,10 +34,12 @@ export default function Wizard({ onComplete }: WizardProps) {
   const saveAndFinish = async () => {
     setSaving(true); setError(null)
     try {
+      const pluginIds: Record<string, string> = {}
       for (const [i, typeId] of selected.entries()) {
         const cfg = configs[typeId] || {}
         const { token, client_secret, ...rest } = cfg as any
         const pluginId = `${typeId}-${i === 0 ? 'main' : i}`
+        pluginIds[typeId] = pluginId
         const createResp = await fetch('/api/plugins', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -45,7 +49,7 @@ export default function Wizard({ onComplete }: WizardProps) {
           const d = await createResp.json()
           throw new Error(d.detail || `Failed to create ${typeId} plugin`)
         }
-        // Store secrets via the auth/pat endpoint
+        // Store PAT only if explicitly provided
         if (token) {
           await fetch(`/api/plugins/${pluginId}/auth/pat`, {
             method: 'POST',
@@ -60,11 +64,16 @@ export default function Wizard({ onComplete }: WizardProps) {
             body: JSON.stringify({ token: client_secret }),
           })
         }
-        // Trigger immediate health check so dashboard shows status
+        // Trigger immediate health check
         fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
-      // Show success step before redirecting
+
+      // If GitHub was selected and no PAT was provided, start OAuth flow
+      const ghConfig = configs['github'] || {}
+      if (selected.includes('github') && !ghConfig.token) {
+        setOauthPluginId(pluginIds['github'])
+      }
       setStep(3)
     } catch (e: any) {
       setError(e.message || 'Failed to save configuration')
@@ -200,7 +209,7 @@ export default function Wizard({ onComplete }: WizardProps) {
         )}
 
         {/* DONE (step 3 — shown after successful save or skip) */}
-        {step === 3 && (
+        {step === 3 && !oauthPluginId && (
           <div style={{ textAlign:'center' }}>
             <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
@@ -218,6 +227,16 @@ export default function Wizard({ onComplete }: WizardProps) {
             <button className="btn btn-primary" style={{ fontSize:15, padding:'10px 28px' }} onClick={onComplete}>
               🧪 Open Dashboard
             </button>
+          </div>
+        )}
+
+        {/* OAuth flow — shown after saving if GitHub needs auth */}
+        {step === 3 && oauthPluginId && (
+          <div>
+            <OAuthModal
+              pluginId={oauthPluginId}
+              onClose={() => setOauthPluginId(null)}
+            />
           </div>
         )}
 

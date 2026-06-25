@@ -22,7 +22,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
     { key: 'project_owner',   label: 'Project Owner',      type: 'text',   placeholder: 'owner or org', hint: 'GitHub user/org that owns the Projects v2 board.', required: true },
     { key: 'project_number',  label: 'Project Number',     type: 'number', placeholder: '1',            hint: 'GitHub Projects v2 board number (integer).', required: true },
     // Auth
-    { key: 'token',           label: 'Personal Access Token', type: 'password', placeholder: 'ghp_… or leave blank to use OAuth', hint: 'Classic PAT with repo + project scopes. Leave blank to authorize via OAuth Device Flow.' },
+    { key: 'token',           label: 'Personal Access Token', type: 'password', placeholder: 'Leave blank to authorize via browser (recommended)', hint: 'Leave blank — you will be redirected to authorize via browser after saving. Only paste a PAT if you prefer manual token management.' },
     // Pages
     { key: 'pages_repo',      label: 'Pages Repository',   type: 'text',   placeholder: 'owner/repo (optional)', hint: 'GitHub Pages repo for publishing the cost/session dashboard.' },
     { key: 'pages_branch',    label: 'Pages Branch',       type: 'text',   placeholder: 'main', defaultValue: 'main', hint: 'Branch to push the generated Pages site to.' },
