@@ -653,10 +653,17 @@ container — no host CLI tools (`gh`, `az`) required.
 docker build -f Dockerfile.server -t gru-server:local .
 
 # Run (fresh install starts the setup wizard)
-docker run -d --name gru-server -p 9400:9400 -v gru-data:/data gru-server:local
+# Add -v ~/.azure:/root/.azure if you want Azure Storage plugin
+docker run -d --name gru-server -p 9400:9400 \
+  -v gru-data:/data \
+  -v ~/.azure:/root/.azure \
+  gru-server:local
 
 # Open http://localhost:9400 — the wizard guides you through plugin setup
 ```
+
+> **Azure Storage plugin** is only shown in the wizard if `/root/.azure` is mounted.
+> The `~/.azure` mount must be **writable** (no `:ro`) — `az` updates its token cache on use.
 
 ### Architecture
 
@@ -682,12 +689,10 @@ docker run -d --name gru-server -p 9400:9400 -v gru-data:/data gru-server:local
 |--------|------------|------------------|
 | **GitHub** | App Manifest Flow → Device Code Flow (browser-only) | Board queries, issue management, Copilot attribution |
 | **GitHub Copilot** | Inherits from GitHub plugin | Session execution, cost tracking |
-| **Azure Storage** | SAS Token (pasted from Azure Portal) or Service Principal | Blob access for firmware bundles |
+| **Azure Storage** | `az` CLI credentials via mounted `~/.azure` | Blob access for firmware bundles |
 | **Obsidian Kanban** | Local file path (mounted volume) | Markdown-based Kanban board watching |
 
 ### Authentication
-
-All auth is **browser-only** — no `gh` or `az` CLI tools inside the container.
 
 **GitHub (GHE):**
 1. **Manifest Flow** — server auto-generates an OAuth App registration form.
@@ -695,10 +700,21 @@ All auth is **browser-only** — no `gh` or `az` CLI tools inside the container.
 2. **Device Code Flow** — user enters a code at `https://<ghe>/login/device`.
    Token stored in vault, auto-refreshed.
 
-**Azure:**
-- **SAS Token** (default) — user generates from Azure Portal, pastes in wizard.
-  No IT admin approval needed. Stored in vault.
-- **Service Principal** — for CI. Client ID + secret + tenant in config.
+**Azure Storage:**
+
+Uses your existing `az login` session from the host machine. The `az` CLI is installed
+inside the container image and reads credentials from the mounted `~/.azure` directory.
+
+- Auth is **automatic** — no token pasting, no app registration.
+- Plugin card is **hidden** in the wizard unless `~/.azure` is mounted.
+- Mount must be **writable** (no `:ro`) — `az` updates its token cache on use.
+- Token is fetched fresh each health check via `az account get-access-token`.
+- Health check has a **30 second timeout** and surfaces `az login` expiry as an error.
+
+Background: SAS tokens are capped at 7 days for user-delegation and require
+`listKeys` permission for account-level SAS. Azure AD device flow requires
+registering an app in the tenant (restricted by IT policy). The `az` CLI approach
+bypasses both limitations — credentials auto-renew with the host `az` session.
 
 ### Server image details
 
