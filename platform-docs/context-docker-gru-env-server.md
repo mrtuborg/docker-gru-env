@@ -22,6 +22,7 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 - **End-to-end Obsidian Sync test** — requires an active Obsidian Sync subscription. Test wizard:
   add Obsidian Sync connector with email/password/vault_name/board_path and verify health shows Healthy.
 - **End-to-end Copilot connector test** — go through wizard, add GitHub → authorize OAuth → add Copilot → verify health.
+- **Architecture review** — pipeline-design.md extended with Resource Provider Model + Config Portability spec. Review before Phase 1 implementation begins.
 
 ### Device State
 
@@ -38,18 +39,19 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 
 ### Next Action
 
-All 4 connectors (GitHub, Copilot, Azure, Obsidian Sync) are implemented with health checks
-and wizard UI. Next session: design how these connectors are used together to build **pipelines,
-agents, and orchestration** — i.e. define the pipeline/watcher layer that sits on top of connectors.
-This is a design/architecture session before any new code is written.
+Pipeline architecture design is complete (design-only session, no code written).
+The full spec is in the session artifact `pipeline-design.md` (1348 lines).
 
-Questions to answer in the design:
-- How does the GitHub connector trigger a Copilot session (issue → session)?
-- How does the Obsidian connector trigger a Copilot session (kanban card → session)?
-- What is a "pipeline" — a named sequence of connector interactions?
-- How does Azure Storage factor in (artifact input/output for sessions)?
-- Where does session state/history live and who owns it?
-- Web UI for pipeline management (create, run, monitor)?
+Next session: begin **Phase 1 implementation** of the Resource Binding model:
+- Add `pipeline_bindings` DB table + migration
+- Implement `provides()` on all 4 connectors
+- Implement `list_board_items()` + `list_board_columns()` on GitHub + Obsidian connectors
+- Update `Pipeline` dataclass to use `bindings: list[ResourceBinding]`
+- Update `GET/PUT /api/pipelines/{id}` API to include bindings
+
+Before coding, read `pipeline-design.md` (session artifact) for the full spec.
+The prior pipeline engine, CRUD API, and UI are already implemented — only the
+resource binding layer and connector capability methods are new.
 
 ---
 

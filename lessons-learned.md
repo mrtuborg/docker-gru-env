@@ -27,3 +27,11 @@
 - [2026-06-25] **obsidian-headless ob CLI version 0.0.12 is available** — confirmed installable via npm in the Docker runtime stage (`python:3.12-slim` + nodesource Node 22). `ob --version` returns `0.0.12`. Install after adding nodesource repo.
 
 - [2026-06-25] **The Obsidian Sync connector syncs to `/vault/ob-<id>/` inside the container** — each connector instance gets its own subdirectory under `/vault` (declared as a VOLUME). The board file path in config is relative to the vault root. md_kanban.py reads the synced files directly.
+
+- [2026-06-25] **Connectors are multi-role resource providers, not single-purpose adapters** — GitHub provides board + code + agents + skills + knowledge + config. Obsidian provides board + agents + skills + knowledge + config. Azure provides artifacts. Copilot provides execution. Design pipelines around resource bindings, not a single "plugin_id".
+
+- [2026-06-25] **Obsidian pipelines are read-only triggers** — `ob sync --mode pull-only` means the connector cannot write back to the vault. Obsidian Kanban cards can trigger Copilot sessions, but "done" state must be written elsewhere (GitHub issue comment, Azure blob marker). This is a known limitation until obsidian-headless supports bidirectional sync.
+
+- [2026-06-25] **Config portability design: never export secrets** — the `gru-server.yaml` export format omits all tokens, passwords, and credentials. After import, each connector requires re-auth. This makes the config file safe to commit to a repo or store in an Obsidian vault.
+
+- [2026-06-25] **Pipeline phase 1 implementation is purely additive** — the pipeline engine, CRUD API, and UI were already fully implemented in a prior session. Phase 1 (resource bindings) adds a new `pipeline_bindings` table and capability methods on connectors without touching the engine or UI. Migration is automatic: existing `plugin_id` auto-creates a `board` binding.
