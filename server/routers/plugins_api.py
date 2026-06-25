@@ -29,6 +29,11 @@ class StorePATRequest(BaseModel):
     token: str
 
 
+class StoreSecretRequest(BaseModel):
+    key:   str
+    value: str
+
+
 # ── Collection ────────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -185,6 +190,17 @@ async def store_pat(plugin_id: str, body: StorePATRequest, request: Request):
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     await store_secret(plugin_id, "token", body.token)
+    return {"ok": True}
+
+
+@router.post("/{plugin_id}/auth/secret")
+async def store_secret_endpoint(plugin_id: str, body: StoreSecretRequest, request: Request):
+    """Store a named secret in the vault (e.g. sas_token, client_secret)."""
+    from ..vault import store_secret
+    pm = request.app.state.plugins
+    if not pm.get(plugin_id):
+        raise HTTPException(404, f"Plugin '{plugin_id}' not found")
+    await store_secret(plugin_id, body.key, body.value)
     return {"ok": True}
 
 

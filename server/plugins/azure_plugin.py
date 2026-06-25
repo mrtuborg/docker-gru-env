@@ -79,6 +79,16 @@ class AzurePlugin(GruPlugin):
             },
         }
 
+    async def auth_status(self) -> dict:
+        """Return auth readiness for the wizard/dashboard."""
+        auth_method = self._config.get("auth_method", "sas_token")
+        if auth_method == "sas_token":
+            sas = await load_secret(self.plugin_id, "sas_token")
+            return {"has_token": sas is not None, "auth_method": "sas_token", "needs_auth": sas is None}
+        else:
+            secret = await load_secret(self.plugin_id, "client_secret")
+            return {"has_token": secret is not None, "auth_method": "service_principal", "needs_auth": secret is None}
+
     async def configure(self, config: dict) -> None:
         self._config = config
         if self._refresh_task and not self._refresh_task.done():

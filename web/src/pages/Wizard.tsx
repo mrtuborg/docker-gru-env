@@ -40,6 +40,15 @@ export default function Wizard({ onComplete }: WizardProps) {
 
   const saveAndFinish = async () => {
     setSaving(true); setError(null)
+
+    const storeSecret = async (pluginId: string, key: string, value: string) => {
+      await fetch(`/api/plugins/${pluginId}/auth/secret`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key, value }),
+      })
+    }
+
     try {
       const pluginIds: Record<string, string> = {}
       for (const [i, typeId] of selected.entries()) {
@@ -56,46 +65,33 @@ export default function Wizard({ onComplete }: WizardProps) {
           const d = await createResp.json()
           throw new Error(d.detail || `Failed to create ${typeId} plugin`)
         }
-        if (token) {
-          await fetch(`/api/plugins/${pluginId}/auth/pat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token }),
-          })
-        }
-        if (client_secret) {
-          await fetch(`/api/plugins/${pluginId}/auth/pat`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ token: client_secret }),
-          })
-        }
+        // Store credentials in vault (never in config)
+        if (token)         await storeSecret(pluginId, 'token', token)
+        if (sas_token)     await storeSecret(pluginId, 'sas_token', sas_token)
+        if (client_secret) await storeSecret(pluginId, 'client_secret', client_secret)
+
         fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
 
-      // Check which plugins need browser auth
+      // Check which plugins need browser-based OAuth
       const pendingAuth: AuthFlowItem[] = []
       for (const typeId of selected) {
         const pluginId = pluginIds[typeId]
         const cfg = configs[typeId] || {}
-        // Skip if user provided a token/PAT
-        if (cfg.token) continue
-        // Only GitHub needs OAuth flow; Azure uses SAS token (pasted in config)
+        // Only GitHub needs browser OAuth; Azure/Copilot/Obsidian use pasted credentials
         if (typeId !== 'github') continue
+        // Skip if user already provided a PAT
+        if (cfg.token) continue
 
-        // Check auth status
         const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
         if (!statusResp.ok) continue
         const authStatus = await statusResp.json()
-
         if (authStatus.has_token) continue
 
         if (authStatus.needs_manifest) {
-          // GHE — need to register a GitHub App first
           pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
         } else if (authStatus.has_client_id) {
-          // github.com or GHE with client_id — device flow
           pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
         }
       }
@@ -103,7 +99,6 @@ export default function Wizard({ onComplete }: WizardProps) {
       if (pendingAuth.length > 0) {
         const [first, ...rest] = pendingAuth
         if (first.flow === 'manifest') {
-          // Redirect browser to manifest registration
           window.location.href = `/api/plugins/${first.pluginId}/auth/manifest/register`
           return
         }
