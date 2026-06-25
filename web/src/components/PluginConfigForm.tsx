@@ -11,6 +11,7 @@ interface Field {
   options?: { value: string; label: string }[]
   defaultValue?: string | number | boolean
   mono?: boolean
+  showWhen?: { field: string; value: string }
 }
 
 const PLUGIN_FIELDS: Record<string, Field[]> = {
@@ -48,11 +49,18 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
     { key: 'watcher_models',  label: 'Model Fallback List', type: 'model-list', hint: 'Ordered list of models. Priority 1 = preferred; higher = cheaper fallback after 3 consecutive failures.' },
   ],
   azure: [
-    { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', required: true, hint: 'Azure Active Directory tenant ID.' },
-    { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', required: true, hint: 'Service principal / app registration client ID.' },
-    { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', required: true, hint: 'Service principal client secret.' },
-    { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'mystorageaccount', required: true, hint: 'Azure Storage account name.' },
+    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'az_cli',
+      options: [
+        { value: 'az_cli',           label: 'Azure CLI (az login — no secrets needed)' },
+        { value: 'service_principal', label: 'Service Principal (client ID + secret)' },
+        { value: 'device_code_flow',  label: 'Device Code Flow (browser auth)' },
+      ],
+      hint: 'Azure CLI uses your existing "az login" session. Service Principal requires an app registration.' },
+    { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, hint: 'Azure Storage account name.' },
     { key: 'container_name',  label: 'Container Name',     type: 'text',   placeholder: 'firmware', hint: 'Default blob container name.' },
+    { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+    { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+    { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
   ],
   obsidian: [
     { key: 'board_path',      label: 'Board File Path',    type: 'text',   placeholder: '/path/to/kanban.md', required: true, hint: 'Absolute path to the Obsidian Kanban markdown file.' },
@@ -147,7 +155,10 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {fields.map(f => (
+      {fields.filter(f => {
+        if (f.showWhen) return values[f.showWhen.field] === f.showWhen.value
+        return true
+      }).map(f => (
         <div key={f.key}>
           {f.type === 'checkbox' ? (
             <label style={{ display:'flex', alignItems:'flex-start', gap:10, cursor:'pointer' }}>
