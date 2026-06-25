@@ -29,8 +29,7 @@ export default function AuthCallback() {
     status === 'error' ? 'error' : 'registered'
   )
 
-  const appSlug = (appName || 'gru-server').toLowerCase().replace(/[\s()]/g, '-').replace(/-+/g, '-')
-  const appSettingsUrl = `https://${host}/settings/apps/${appSlug}`
+  const appSettingsUrl = params.get('settings_url') || `https://${host}/settings/apps`
 
   if (!pluginId) {
     return (

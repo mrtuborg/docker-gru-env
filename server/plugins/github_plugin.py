@@ -191,6 +191,7 @@ class GitHubPlugin(GruPlugin):
             "app_id": app_id,
             "app_name": data.get("name"),
             "client_id": client_id,
+            "html_url": data.get("html_url", ""),
         }
 
     async def _enable_device_flow(self, api_base: str, app_id: int, pem: str) -> None:

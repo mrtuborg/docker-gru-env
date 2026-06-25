@@ -54,8 +54,10 @@ async def manifest_callback(code: str, state: str, request: Request):
     app_name = app_info.get("app_name", "Gru")
     app_id = app_info.get("app_id", "")
     host = plugin._config.get("host", "github.com")
+    html_url = app_info.get("html_url", "")
+    import urllib.parse
     return RedirectResponse(
         f"{server_url()}/#/auth-callback"
-        f"?plugin={plugin_id}&status=app_registered&app_name={app_name}"
-        f"&app_id={app_id}&host={host}"
+        f"?plugin={plugin_id}&status=app_registered&app_name={urllib.parse.quote(app_name)}"
+        f"&app_id={app_id}&host={host}&settings_url={urllib.parse.quote(html_url)}"
     )
