@@ -174,6 +174,7 @@ export default function Wizard({ onComplete }: WizardProps) {
             </div>
 
             <PluginConfigForm
+              key={currentTypeMeta.id}
               pluginType={currentTypeMeta.id}
               initialValues={configs[currentTypeMeta.id] || {}}
               onChange={vals => setConfigs(c => ({ ...c, [currentTypeMeta.id]: vals }))}
