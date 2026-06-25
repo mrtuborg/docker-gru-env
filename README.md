@@ -4,6 +4,13 @@ Per-session AI cost tracking for [GitHub Copilot CLI](https://docs.github.com/co
 Tracks token usage and USD cost per session, attributes costs to GitHub issues, and renders an HTML dashboard.
 Ships a Docker-backed shell environment (`gru`) for running autopilot sessions, board watchers, and cost tools.
 
+Two modes of operation:
+
+| Mode | Entry point | Use case |
+|------|------------|----------|
+| **Shell environment** (`source ./gru`) | `gru` script — sourced in your terminal | Developers running Copilot sessions interactively |
+| **Server** (`gru-server`) | `Dockerfile.server` — standalone web UI + API | Fully self-contained, browser-only setup wizard, no host tools needed |
+
 ## What it does
 
 - **`src/cost-sync.py`** — called by the `sessionEnd` hook; reads token telemetry from `events.jsonl` and appends one cost record to `~/.copilot/cost-log.jsonl`
@@ -630,6 +637,165 @@ hello() {
 - Installs the standalone **GitHub Copilot CLI** via `npm install -g @github/copilot`.
 - Installs a `gh-copilot` **shim** so `gh copilot -- …` (used by `watcher-run.sh`) keeps working.
 - `ENV COPILOT_DATA_HOME=/data/copilot`; declares volumes for `/data/copilot`, `/logs`, `/workspace`.
+
+---
+
+## Gru Server (`Dockerfile.server`)
+
+A standalone web UI + API that replaces the submodule workflow with a browser-based
+setup wizard, plugin system, and visual pipeline editor. Runs entirely inside a Docker
+container — no host CLI tools (`gh`, `az`) required.
+
+### Quick start
+
+```bash
+# Build
+docker build -f Dockerfile.server -t gru-server:local .
+
+# Run (fresh install starts the setup wizard)
+docker run -d --name gru-server -p 9400:9400 -v gru-data:/data gru-server:local
+
+# Open http://localhost:9400 — the wizard guides you through plugin setup
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│  Browser (React SPA)                            │
+│  Dashboard · Plugins · Pipelines · Agents       │
+│  Boards · Sessions · Settings                   │
+└────────────────┬────────────────────────────────┘
+                 │ REST + SSE
+┌────────────────▼────────────────────────────────┐
+│  FastAPI Server (:9400)                         │
+│  ├── Plugin Manager (registry, lifecycle)       │
+│  ├── Pipeline Engine (board poll, agent exec)   │
+│  ├── Vault (AES-256-GCM encrypted secrets)      │
+│  └── SQLite config DB (/data/gru.db)            │
+└─────────────────────────────────────────────────┘
+```
+
+### Plugin system
+
+| Plugin | Auth method | What it provides |
+|--------|------------|------------------|
+| **GitHub** | App Manifest Flow → Device Code Flow (browser-only) | Board queries, issue management, Copilot attribution |
+| **GitHub Copilot** | Inherits from GitHub plugin | Session execution, cost tracking |
+| **Azure Storage** | SAS Token (pasted from Azure Portal) or Service Principal | Blob access for firmware bundles |
+| **Obsidian Kanban** | Local file path (mounted volume) | Markdown-based Kanban board watching |
+
+### Authentication
+
+All auth is **browser-only** — no `gh` or `az` CLI tools inside the container.
+
+**GitHub (GHE):**
+1. **Manifest Flow** — server auto-generates an OAuth App registration form.
+   User clicks "Create GitHub App" on GHE → one-click registration.
+2. **Device Code Flow** — user enters a code at `https://<ghe>/login/device`.
+   Token stored in vault, auto-refreshed.
+
+**Azure:**
+- **SAS Token** (default) — user generates from Azure Portal, pastes in wizard.
+  No IT admin approval needed. Stored in vault.
+- **Service Principal** — for CI. Client ID + secret + tenant in config.
+
+### Server image details
+
+- **Multi-stage build:** `node:22-alpine` (React build) → `python:3.12-slim` (runtime)
+- **Size:** ~345 MB
+- **Data:** `/data` volume — SQLite DB, vault, plugin state
+- **Port:** 9400 (configurable via `GRU_PORT`)
+- **Health check:** `curl -sf http://localhost:9400/api/wizard/status`
+
+### Environment variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GRU_DATA_DIR` | `/data` | Persistent state directory |
+| `GRU_PORT` | `9400` | Server listen port |
+| `GRU_SERVER_URL` | `http://localhost:9400` | Public URL (for OAuth redirects) |
+| `GRU_VAULT_KEY` | auto-generated | AES-256 encryption key for secrets vault |
+
+### API overview
+
+```
+# Wizard
+GET  /api/wizard/status            Setup status (needs_setup, plugin_count)
+POST /api/wizard/save               Save initial configuration
+
+# Plugins
+POST   /api/plugins                 Create plugin
+GET    /api/plugins                 List plugins
+GET    /api/plugins/{id}            Get plugin details
+PUT    /api/plugins/{id}            Update plugin config
+DELETE /api/plugins/{id}            Delete plugin
+GET    /api/plugins/{id}/health     Plugin health check
+
+# Auth (browser-only OAuth)
+GET  /api/plugins/{id}/auth/status              Auth readiness
+GET  /api/plugins/{id}/auth/manifest/register   Start GitHub App Manifest Flow
+GET  /api/auth/github/manifest-callback         Manifest Flow callback
+POST /api/plugins/{id}/auth/device-flow/start   Start Device Code Flow
+POST /api/plugins/{id}/auth/device-flow/poll    Poll Device Code Flow
+
+# Pipelines
+POST   /api/pipelines              Create pipeline
+GET    /api/pipelines              List pipelines
+GET    /api/pipelines/{id}         Get pipeline + stages + status
+PUT    /api/pipelines/{id}         Update pipeline
+DELETE /api/pipelines/{id}         Delete pipeline
+POST   /api/pipelines/{id}/start   Start watcher loop
+POST   /api/pipelines/{id}/stop    Stop watcher loop
+GET    /api/pipelines/{id}/runs    Run history
+GET    /api/pipelines/{id}/logs    SSE live log stream
+
+# Agents
+POST   /api/agents                 Create agent
+GET    /api/agents                 List agents
+GET    /api/agents/{id}            Get agent details
+PUT    /api/agents/{id}            Update agent
+DELETE /api/agents/{id}            Delete agent
+POST   /api/agents/import-file     Import from .agent.md file
+POST   /api/agents/import-repo     Import from git repository
+
+# Dashboard, Boards, Sessions, Settings
+GET  /api/dashboard                Dashboard summary
+GET  /api/boards                   Board visualization
+GET  /api/sessions                 Session list
+GET  /api/settings                 Server settings
+PUT  /api/settings                 Update settings
+```
+
+### SPA pages
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/` | Dashboard | Overview: plugin status, pipeline summary, recent activity |
+| `/plugins` | Plugins | Plugin cards with health indicators, add/configure |
+| `/pipelines` | Pipelines | Pipeline list with status, start/stop, live issue counts |
+| `/pipelines/:id/edit` | Pipeline Editor | Visual stage editor with inspector panel |
+| `/pipelines/:id/runs` | Pipeline Runs | Run history with per-issue results |
+| `/pipelines/:id/logs` | Pipeline Logs | SSE live log viewer |
+| `/agents` | Agent Library | Agent list, import from file/repo, inline editor |
+| `/boards` | Boards | Board visualization (GitHub Projects) |
+| `/sessions` | Sessions | Copilot session tracking |
+| `/settings` | Settings | Server configuration, vault management |
+| `/wizard` | Setup Wizard | First-run plugin configuration |
+| `/auth-callback` | Auth Callback | OAuth redirect handler (manifest flow) |
+
+### Design
+
+The UI follows the same color theme as `gh-watcher` in gru:
+
+- **Dark background:** `#0d1117` (GitHub dark)
+- **Cards:** `#161b22` with `#30363d` borders
+- **Accent:** `#58a6ff` (blue links and active states)
+- **Success/Error:** `#3fb950` / `#f85149`
+- **Text:** `#e6edf3` primary, `#8b949e` secondary
+
+Navigation uses a left sidebar with icon + label. A gear icon (⚙) in the sidebar
+provides quick access to Settings from any page.
 
 ---
 
