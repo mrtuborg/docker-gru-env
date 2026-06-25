@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Check, X } from 'lucide-react'
 
-interface OAuthModalProps { pluginId: string; onClose: () => void; inline?: boolean }
+interface OAuthModalProps { pluginId: string; onClose: (err?: string) => void; inline?: boolean }
 
 export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProps) {
   const [flowData, setFlowData] = useState<any>(null)
@@ -31,7 +31,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
           if (result.granted) {
             clearInterval(pollRef.current!)
             setStatus('success')
-            setTimeout(onClose, 1500)
+            setTimeout(() => onClose(), 1500)
           } else if (!r.ok) {
             clearInterval(pollRef.current!)
             setStatus('error')
@@ -63,7 +63,7 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
       <div className="modal-card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
           <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize Plugin</div>
-          <button className="btn btn-ghost" style={{ padding:'4px 8px' }} onClick={onClose}><X size={16}/></button>
+          <button className="btn btn-ghost" style={{ padding:'4px 8px' }} onClick={() => onClose()}><X size={16}/></button>
         </div>
 
         {status === 'loading' && (
@@ -112,8 +112,30 @@ export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProp
         {status === 'error' && (
           <div style={{ textAlign:'center', padding:16 }}>
             <div style={{ fontSize:36, marginBottom:8 }}>✗</div>
-            <div style={{ color:'var(--red)', marginBottom:16 }}>{message || 'Authorization failed'}</div>
-            <button className="btn btn-secondary" onClick={onClose}>Close</button>
+            <div style={{ color:'var(--red)', marginBottom:16, fontSize:13, whiteSpace:'pre-line' }}>
+              {message || 'Authorization failed'}
+            </div>
+            <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
+              <button className="btn btn-secondary" onClick={() => onClose(message)}>Close</button>
+              {message?.includes('not enabled') && (
+                <button className="btn btn-primary" onClick={() => {
+                  setStatus('loading'); setMessage('')
+                  fetch(`/api/plugins/${pluginId}/auth/device/start`, { method:'POST' })
+                    .then(async r => {
+                      const d = await r.json()
+                      if (!r.ok) { setStatus('error'); setMessage(d.detail || 'Failed'); return }
+                      setFlowData(d); setStatus('waiting'); setCountdown(d.expires_in || 900)
+                      pollRef.current = setInterval(async () => {
+                        const r2 = await fetch(`/api/plugins/${pluginId}/auth/device/poll`, { method:'POST' })
+                        const res = await r2.json()
+                        if (res.granted) { clearInterval(pollRef.current!); setStatus('success'); setTimeout(() => onClose(), 1500) }
+                        else if (!r2.ok) { clearInterval(pollRef.current!); setStatus('error'); setMessage(res.detail || 'Failed') }
+                      }, (d.interval || 5) * 1000)
+                    })
+                    .catch(e => { setStatus('error'); setMessage(String(e)) })
+                }}>↺ Try Again</button>
+              )}
+            </div>
           </div>
         )}
       </div>

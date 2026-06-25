@@ -266,6 +266,16 @@ class GitHubPlugin(GruPlugin):
             if resp.status_code != 200:
                 body = resp.text
                 logger.error("Device flow start failed (%d): %s", resp.status_code, body)
+                try:
+                    err = resp.json().get("error", "")
+                    if err == "device_flow_disabled":
+                        raise ValueError(
+                            "Device Flow is not enabled for this GitHub App yet.\n"
+                            "Go back to GitHub App Settings → 'Identifying and authorizing users' "
+                            "→ check 'Enable Device Flow' → Save changes, then try again."
+                        )
+                except (ValueError, AttributeError):
+                    pass
                 raise ValueError(f"GitHub rejected device flow ({resp.status_code}): {body}")
             return resp.json()
 

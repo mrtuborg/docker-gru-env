@@ -111,7 +111,14 @@ export default function AuthCallback() {
         {phase === 'device_flow' && (
           <OAuthModal
             pluginId={pluginId}
-            onClose={() => navigate('/')}
+            onClose={(err?: string) => {
+              // If device flow was disabled, bounce back to the enable step
+              if (err && err.includes('not enabled')) {
+                setPhase('enable_device_flow')
+              } else {
+                navigate('/')
+              }
+            }}
             inline
           />
         )}
