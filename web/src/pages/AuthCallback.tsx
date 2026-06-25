@@ -59,13 +59,13 @@ export default function AuthCallback() {
             <div style={{ background:'var(--surface2)', border:'1px solid var(--border)', borderRadius:8,
               padding:'12px 16px', marginBottom:20, textAlign:'left' }}>
               <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:8 }}>
-                <img src="/minion.svg" alt="Minion logo" width={36} height={36} style={{ borderRadius:6 }}/>
+                <img src="/minion.png" alt="Minion logo" width={40} height={36} style={{ borderRadius:6 }}/>
                 <div style={{ fontWeight:600, fontSize:13 }}>Optional: Set a logo for your GitHub App</div>
               </div>
               <p style={{ color:'var(--muted)', fontSize:12, marginBottom:10, lineHeight:1.5 }}>
                 Download the Gru minion logo and upload it in the GitHub App settings → Display information.
               </p>
-              <a href="/minion.svg" download="gru-minion.svg"
+              <a href="/minion.png" download="gru-minion.png"
                 style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'6px 12px',
                   background:'var(--surface3)', border:'1px solid var(--border)', borderRadius:5,
                   fontSize:12, fontWeight:500, color:'var(--text)', textDecoration:'none' }}>
