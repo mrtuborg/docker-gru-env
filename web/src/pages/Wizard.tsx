@@ -5,7 +5,7 @@ import OAuthModal from '../components/OAuthModal'
 
 const PLUGIN_TYPES = [
   { id:'github',   name:'GitHub',          icon: GitBranch, color:'#58a6ff', desc:'Project board watcher, cost reporting, session attribution' },
-  { id:'copilot',  name:'GitHub Copilot',  icon: Bot,       color:'#3fb950', desc:'Interactive and automated Copilot CLI sessions with cost tracking' },
+  { id:'copilot',  name:'GitHub Copilot',  icon: Bot,       color:'#3fb950', desc:'Runs Copilot CLI sessions via the web UI. Uses your GitHub connector token — no separate login needed.' },
   { id:'azure',    name:'Azure Storage',   icon: Cloud,     color:'#79c0ff', desc:'Azure Blob Storage access for firmware bundles' },
   { id:'obsidian', name:'Obsidian Kanban', icon: FileText,  color:'#bc8cff', desc:'Watches Obsidian Kanban boards and runs Copilot sessions per card' },
 ]

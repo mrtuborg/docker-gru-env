@@ -13,3 +13,9 @@
 - [2026-06-25] **Azure plugin availability should be gated on volume mount** — show the Azure plugin card in the wizard only when `/root/.azure` exists. Exposing it unconditionally confuses users who haven't mounted the volume. `GET /api/plugins/types` returns `available: bool` per type; wizard filters accordingly.
 
 - [2026-06-25] **Dashboard shows "Not yet checked" until first health poll** — initial plugin health state is `unknown`. The first `health()` call happens asynchronously after plugin creation. This is expected; the dashboard auto-refreshes. Adding a `asyncio.wait_for(..., timeout=30)` wrapper prevents the health endpoint from hanging indefinitely.
+
+- [2026-06-25] **Copilot connector form had leaked pipeline/watcher fields** — `board_dir`, `watcher_stage_order`, `watcher_poll_interval`, `watcher_max_issues`, `watcher_max_per_issue` were showing in the wizard from an old design. The Copilot connector only needs `github_connector_id`. Strip watcher fields from the connector config; they belong in a future pipeline/watcher feature.
+
+- [2026-06-25] **Wiping gru-data volume is required to re-trigger wizard** — after the wizard completes it sets a `wizard_complete` flag in the DB. Restarting the container without `docker volume rm gru-data` keeps old data and shows the dashboard instead of the wizard. Always include `docker volume rm gru-data` when you need a fresh wizard run for testing.
+
+- [2026-06-25] **Connector rename: only UI/Python internals changed, not API/DB** — API URL paths remain `/api/plugins/*`, DB table stays `plugins`, JSON key stays `plugin_type`. Only Python class names and TypeScript symbols were renamed. Don't confuse the two layers when searching for references.

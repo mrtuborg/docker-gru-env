@@ -9,8 +9,9 @@
 ### What this track is
 
 Building `gru-server` — a standalone Docker container mode with a React web UI wizard
-for configuring and authenticating plugins (GitHub, Azure, Copilot, Obsidian).
+for configuring and authenticating connectors (GitHub, Azure, Copilot, Obsidian).
 Replaces the submodule-based `docker-gru-env` workflow with a browser-only setup.
+Note: code internals use "connector" everywhere; DB table + API URLs kept as "plugins" for backward compat.
 
 ### Issue Status
 
@@ -18,16 +19,15 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 
 ### Needs Human
 
-- **Azure plugin end-to-end test** — container is running on port 9400 with `~/.azure` mounted.
-  User needs to go through wizard, add Azure Storage plugin (`rmeswprod` / `artifacts`),
-  and verify health shows "Healthy" after the first poll (~30 seconds).
+- **End-to-end connector test** — container is fresh (no connectors). Run wizard at `localhost:9400`,
+  add GitHub → authorize OAuth → add Copilot (inherits GitHub token automatically) → verify health.
 
 ### Device State
 
 - Container: `gru-server-test` running on port 9400
-- Volume: `gru-data` (fresh — no plugins configured)
+- Volume: `gru-data` (fresh — no connectors configured, wizard will show)
 - Mount: `~/.azure:/root/.azure` (writable — required for az CLI token cache)
-- Image: `gru-server:latest` (built from `feature/gru-server` HEAD)
+- Image: `gru-server:latest` (rebuilt 2026-06-25 with gh CLI 2.95 + az CLI)
 - Restart command:
   ```bash
   docker rm -f gru-server-test && docker volume rm gru-data && \
@@ -37,19 +37,26 @@ No GHE project board. Work tracked via commits on `feature/gru-server`.
 
 ### Next Action
 
-Azure plugin is implemented and container is running. Next: verify end-to-end by running
-the wizard at `localhost:9400` → add Azure Storage (`rmeswprod` / `artifacts`) → confirm
-health shows Healthy. Then push `feature/gru-server` and open a PR to `main`.
+Next session: rework the Obsidian connector from a file-path-based MD reader into an
+**Obsidian Sync connector** — this means connecting to Obsidian Sync (cloud service) instead
+of requiring a local mounted directory. Research Obsidian Sync API/approach, propose design,
+then implement.
 
 Remaining work on the feature branch:
-- Test Azure plugin health end-to-end
-- Test plugin settings page: confirm settings-phase fields render correctly when editing existing plugin
-- Verify `board_url` round-trips correctly on plugin reload (reconstruct URL from `project_owner + project_number + host`)
-- Push branch + open PR
+- Rework Obsidian MD connector → Obsidian Sync connector (next session goal)
+- Test Copilot connector health end-to-end after wizard setup
+- Open PR: `feature/gru-server` → `main`
 
 ---
 
 ## Shared
+
+### Connector naming convention
+
+- **UI + Python internals**: "connector" everywhere (`GruConnector`, `ConnectorManager`, `ConnectorConfigForm.tsx`)
+- **API URL paths**: `/api/plugins/*` (kept unchanged for backward compat)
+- **DB table**: `plugins` (unchanged)
+- **JSON key**: `plugin_type` (unchanged)
 
 ### Azure auth solution (final)
 
@@ -59,7 +66,14 @@ Remaining work on the feature branch:
 - Auth: `az account get-access-token --resource https://storage.azure.com/` via subprocess
 - 20s subprocess timeout + 30s asyncio wrapper prevents hangs
 - Mount **without** `:ro` — `az` needs to write token cache
-- Azure plugin card hidden in wizard when `/root/.azure` not present (`GET /api/plugins/types`)
+- Azure connector card hidden in wizard when `/root/.azure` not present (`GET /api/plugins/types`)
+
+### Copilot connector auth
+
+- No separate login. Reads GitHub token from vault via linked GitHub connector ID (auto-discovers if blank).
+- Runs `gh auth login --with-token` inside the container using that token.
+- Health check: gh available → token exists → `gh copilot` extension installed (DEGRADED if extension missing, not ERROR).
+- `gh copilot` extension must be installed post-auth: `gh extension install github/gh-copilot`.
 
 ### Build
 
@@ -68,7 +82,7 @@ cd /Users/vn/ws/platform-development/docker-gru-env-server
 docker build -f Dockerfile.server -t gru-server:latest .
 ```
 
-### GitHub plugin (working)
+### GitHub connector (working)
 
 - GHE host: `sensio.ghe.com`
 - Wizard: App Manifest → Device Code Flow (all browser-based)
@@ -79,11 +93,13 @@ docker build -f Dockerfile.server -t gru-server:latest .
 
 | File | Purpose |
 |------|---------|
-| `server/plugins/azure_plugin.py` | Azure plugin — az CLI subprocess auth |
-| `server/plugins/github_plugin.py` | GitHub plugin — App Manifest + Device Code |
-| `server/routers/plugins_api.py` | REST API including `/api/plugins/types` |
+| `server/connectors/azure_connector.py` | Azure connector — az CLI subprocess auth |
+| `server/connectors/github_connector.py` | GitHub connector — App Manifest + Device Code |
+| `server/connectors/copilot_connector.py` | Copilot connector — gh CLI health, token from GitHub vault |
+| `server/connectors/obsidian_connector.py` | Obsidian connector — file-path MD reader (to be replaced) |
+| `server/routers/connectors_api.py` | REST API serving `/api/plugins/*` endpoints |
 | `web/src/pages/Wizard.tsx` | Setup wizard — fetches availability, auth queue |
-| `web/src/components/PluginConfigForm.tsx` | Per-plugin config forms |
+| `web/src/components/ConnectorConfigForm.tsx` | Per-connector config forms |
 | `web/src/pages/Dashboard.tsx` | Dashboard with `useLocation().key` for refresh |
-| `Dockerfile.server` | Multi-stage build; installs az CLI in runtime image |
-| `lessons-learned.md` | Non-obvious discoveries (Azure auth, UX fixes) |
+| `Dockerfile.server` | Multi-stage build; installs az CLI + gh CLI 2.95 in runtime |
+| `lessons-learned.md` | Non-obvious discoveries (Azure auth, UX fixes, connector design) |
