@@ -1,11 +1,16 @@
-"""Plugins router — CRUD, health, OAuth flows."""
+"""Plugins router — CRUD, health, OAuth flows, GitHub App Manifest registration."""
 from __future__ import annotations
 
 import asyncio
+import json
+import secrets as sec
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+
+from .auth import register_manifest_state
 
 router = APIRouter()
 
@@ -86,7 +91,6 @@ async def plugin_health(plugin_id: str, request: Request):
     if not plugin:
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     health = await plugin.health()
-    # Update cache
     pm._health_cache[plugin_id] = health
     return {"status": health.status, "message": health.message, "details": health.details}
 
@@ -100,15 +104,37 @@ async def plugin_schema(plugin_id: str, request: Request):
     return plugin.config_schema()
 
 
-# ── OAuth ─────────────────────────────────────────────────────────────────────
+# ── Auth status ───────────────────────────────────────────────────────────────
 
-# Pending device flows: plugin_id → {device_code, interval, task}
+@router.get("/{plugin_id}/auth/status")
+async def auth_status(plugin_id: str, request: Request):
+    """
+    Return auth readiness for a plugin.
+    For GitHub: { has_token, has_client_id, needs_manifest, host }
+    For Azure: { has_token, needs_auth }
+    """
+    pm = request.app.state.plugins
+    plugin = pm.get(plugin_id)
+    if not plugin:
+        raise HTTPException(404, f"Plugin '{plugin_id}' not found")
+
+    if hasattr(plugin, "auth_status"):
+        return await plugin.auth_status()
+
+    # Generic: check if a token exists
+    from ..vault import load_secret
+    token = await load_secret(plugin_id, "token") or await load_secret(plugin_id, "access_token")
+    return {"has_token": token is not None}
+
+
+# ── OAuth Device Flow (GitHub + Azure) ────────────────────────────────────────
+
 _pending_flows: dict[str, dict] = {}
 
 
 @router.post("/{plugin_id}/auth/device/start")
 async def start_device_flow(plugin_id: str, request: Request):
-    """Start OAuth device flow. Returns user_code + verification_uri."""
+    """Start OAuth device flow for GitHub or Azure. Returns user_code + verification_uri."""
     pm = request.app.state.plugins
     plugin = pm.get(plugin_id)
     if not plugin:
@@ -124,13 +150,15 @@ async def start_device_flow(plugin_id: str, request: Request):
             "expires_in":       flow.get("expires_in", 900),
             "interval":         flow.get("interval", 5),
         }
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     except Exception as exc:
         raise HTTPException(500, str(exc))
 
 
 @router.post("/{plugin_id}/auth/device/poll")
 async def poll_device_flow(plugin_id: str, request: Request):
-    """Poll for OAuth token. Returns {granted: bool, message: str}."""
+    """Poll for OAuth token (GitHub or Azure). Returns {granted: bool, message: str}."""
     pm = request.app.state.plugins
     plugin = pm.get(plugin_id)
     if not plugin:
@@ -168,3 +196,57 @@ async def list_credentials(plugin_id: str, request: Request):
     if not pm.get(plugin_id):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     return await list_secret_keys(plugin_id)
+
+
+# ── GitHub App Manifest Flow ─────────────────────────────────────────────────
+
+# Pending manifest registrations: state → plugin_id
+_manifest_states: dict[str, str] = {}
+
+
+@router.get("/{plugin_id}/auth/manifest/register")
+async def manifest_register(plugin_id: str, request: Request):
+    """
+    Serve an HTML page that auto-submits the GitHub App manifest form.
+    This redirects the user's browser to GitHub to create the OAuth App.
+    """
+    pm = request.app.state.plugins
+    plugin = pm.get(plugin_id)
+    if not plugin:
+        raise HTTPException(404, f"Plugin '{plugin_id}' not found")
+    if not hasattr(plugin, "get_manifest"):
+        raise HTTPException(400, "Plugin does not support manifest registration")
+
+    manifest = plugin.get_manifest()
+    host = plugin._config.get("host", "github.com")
+    state = sec.token_urlsafe(32)
+    register_manifest_state(state, plugin_id)
+
+    manifest_json = json.dumps(manifest)
+    action_url = f"https://{host}/settings/apps/new?state={state}"
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><title>Registering GitHub App…</title>
+<style>
+  body {{ background: #0d1117; color: #c9d1d9; font-family: -apple-system, sans-serif;
+         display: flex; align-items: center; justify-content: center; min-height: 100vh; }}
+  .card {{ background: #161b22; border: 1px solid #30363d; border-radius: 12px;
+           padding: 40px; text-align: center; max-width: 420px; }}
+  h2 {{ color: #58a6ff; margin-bottom: 12px; }}
+  p {{ color: #8b949e; line-height: 1.6; }}
+</style>
+</head>
+<body>
+  <div class="card">
+    <h2>🔧 Registering GitHub App</h2>
+    <p>Redirecting to <strong>{host}</strong> to create the OAuth App…<br>
+       Click "Create GitHub App" on the next page.</p>
+    <form id="mf" method="post" action="{action_url}">
+      <input type="hidden" name="manifest" value='{manifest_json}'>
+    </form>
+  </div>
+  <script>document.getElementById('mf').submit();</script>
+</body>
+</html>"""
+    return HTMLResponse(html)

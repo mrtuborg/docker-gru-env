@@ -12,18 +12,25 @@ const PLUGIN_TYPES = [
 
 interface WizardProps { onComplete: () => void }
 
-// Steps: 0=Welcome, 1=Select, 2=Configure (one per selected plugin), last=Done
+// Auth flow queue item
+interface AuthFlowItem {
+  pluginId: string
+  pluginType: string
+  flow: 'device' | 'manifest'
+}
+
 export default function Wizard({ onComplete }: WizardProps) {
   const [step, setStep] = useState(0)
   const [selected, setSelected] = useState<string[]>([])
-  const [configStep, setConfigStep] = useState(0) // index into selected[]
+  const [configStep, setConfigStep] = useState(0)
   const [configs, setConfigs] = useState<Record<string, Record<string, any>>>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [oauthPluginId, setOauthPluginId] = useState<string | null>(null)
+  // Auth flow queue — process one at a time
+  const [authQueue, setAuthQueue] = useState<AuthFlowItem[]>([])
+  const [currentAuth, setCurrentAuth] = useState<AuthFlowItem | null>(null)
 
   const stepLabels = ['Welcome', 'Plugins', ...(selected.length > 0 ? ['Configure'] : []), 'Done']
-  // visual step index: 0=welcome, 1=select, 2=configure (if any), 3=done
   const visualStep = step === 0 ? 0 : step === 1 ? 1 : step === 2 && selected.length > 0 ? 2 : stepLabels.length - 1
 
   const togglePlugin = (id: string) =>
@@ -49,7 +56,6 @@ export default function Wizard({ onComplete }: WizardProps) {
           const d = await createResp.json()
           throw new Error(d.detail || `Failed to create ${typeId} plugin`)
         }
-        // Store PAT only if explicitly provided
         if (token) {
           await fetch(`/api/plugins/${pluginId}/auth/pat`, {
             method: 'POST',
@@ -64,23 +70,69 @@ export default function Wizard({ onComplete }: WizardProps) {
             body: JSON.stringify({ token: client_secret }),
           })
         }
-        // Trigger immediate health check
         fetch(`/api/plugins/${pluginId}/health`).catch(() => {})
       }
       await fetch('/api/wizard/complete', { method: 'POST' })
 
-      // If GitHub was selected and no PAT was provided, try OAuth for github.com
-      // For GHE hosts, gh CLI auth is used automatically (no OAuth app needed)
-      const ghConfig = configs['github'] || {}
-      const ghHost = (ghConfig.host || 'github.com').toLowerCase()
-      if (selected.includes('github') && !ghConfig.token && ghHost === 'github.com') {
-        setOauthPluginId(pluginIds['github'])
+      // Check which plugins need browser auth
+      const pendingAuth: AuthFlowItem[] = []
+      for (const typeId of selected) {
+        const pluginId = pluginIds[typeId]
+        const cfg = configs[typeId] || {}
+        // Skip if user provided a token/PAT
+        if (cfg.token) continue
+        // Skip plugins that don't need OAuth (copilot, obsidian)
+        if (typeId !== 'github' && typeId !== 'azure') continue
+
+        // Check auth status
+        const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
+        if (!statusResp.ok) continue
+        const authStatus = await statusResp.json()
+
+        if (authStatus.has_token) continue
+
+        if (typeId === 'github' && authStatus.needs_manifest) {
+          // GHE — need to register a GitHub App first
+          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
+        } else if (typeId === 'github' && authStatus.has_client_id) {
+          // github.com or GHE with client_id — device flow
+          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+        } else if (typeId === 'azure') {
+          // Azure always supports device flow
+          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+        }
+      }
+
+      if (pendingAuth.length > 0) {
+        const [first, ...rest] = pendingAuth
+        if (first.flow === 'manifest') {
+          // Redirect browser to manifest registration
+          window.location.href = `/api/plugins/${first.pluginId}/auth/manifest/register`
+          return
+        }
+        setAuthQueue(rest)
+        setCurrentAuth(first)
       }
       setStep(3)
     } catch (e: any) {
       setError(e.message || 'Failed to save configuration')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleAuthClose = () => {
+    // Move to next auth flow in queue
+    if (authQueue.length > 0) {
+      const [next, ...rest] = authQueue
+      if (next.flow === 'manifest') {
+        window.location.href = `/api/plugins/${next.pluginId}/auth/manifest/register`
+        return
+      }
+      setAuthQueue(rest)
+      setCurrentAuth(next)
+    } else {
+      setCurrentAuth(null)
     }
   }
 
@@ -210,8 +262,8 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* DONE (step 3 — shown after successful save or skip) */}
-        {step === 3 && !oauthPluginId && (
+        {/* DONE (step 3) */}
+        {step === 3 && !currentAuth && (
           <div style={{ textAlign:'center' }}>
             <div style={{ fontSize:48, marginBottom:16 }}>✅</div>
             <h2 style={{ fontSize:20, fontWeight:700, marginBottom:8 }}>
@@ -232,12 +284,16 @@ export default function Wizard({ onComplete }: WizardProps) {
           </div>
         )}
 
-        {/* OAuth flow — shown after saving if GitHub needs auth */}
-        {step === 3 && oauthPluginId && (
+        {/* OAuth Device Flow — shown for each plugin needing browser auth */}
+        {step === 3 && currentAuth && (
           <div>
+            <div style={{ fontSize:12, color:'var(--muted)', marginBottom:12, textAlign:'center' }}>
+              Authorizing {currentAuth.pluginType === 'github' ? '🔗 GitHub' : '☁️ Azure'}
+              {authQueue.length > 0 && ` (${authQueue.length + 1} remaining)`}
+            </div>
             <OAuthModal
-              pluginId={oauthPluginId}
-              onClose={() => setOauthPluginId(null)}
+              pluginId={currentAuth.pluginId}
+              onClose={handleAuthClose}
             />
           </div>
         )}

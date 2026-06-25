@@ -63,7 +63,7 @@ export default function OAuthModal({ pluginId, onClose }: OAuthModalProps) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal-card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
-          <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize GitHub Plugin</div>
+          <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize Plugin</div>
           <button className="btn btn-ghost" style={{ padding:'4px 8px' }} onClick={onClose}><X size={16}/></button>
         </div>
 

@@ -1,19 +1,32 @@
 """
 GitHub Plugin — connects to GitHub / GHE for project board watching.
+
+Auth strategy (container-aware):
+  1. Check vault for stored token
+  2. (Native only) Try `gh auth token --hostname <host>`
+  3. (Browser) OAuth Device Flow — needs a client_id
+  4. For GHE without a client_id: GitHub App Manifest Flow auto-registers one
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-import time
-from typing import Any
+import os
+import secrets
+from typing import Any, Optional
 
 import httpx
 
 from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
+from ..runtime import is_container, server_url
 from ..vault import load_secret, store_secret
 
 logger = logging.getLogger(__name__)
+
+# Vault key names for app registration credentials
+_APP_CLIENT_ID_KEY = "app_client_id"
+_APP_CLIENT_SECRET_KEY = "app_client_secret"
 
 
 class GitHubPlugin(GruPlugin):
@@ -39,12 +52,9 @@ class GitHubPlugin(GruPlugin):
     def config_schema(cls) -> dict:
         return {
             "type": "object",
-            "required": ["host", "data_repo", "project_owner", "project_number"],
+            "required": ["host", "project_owner", "project_number"],
             "properties": {
                 "host":            {"type": "string", "title": "GitHub Host", "default": "github.com"},
-                "auth_method":     {"type": "string", "title": "Auth Method",
-                                    "enum": ["oauth_device_flow", "personal_access_token"],
-                                    "default": "oauth_device_flow"},
                 "data_repo":       {"type": "string", "title": "Data Repo (owner/repo)"},
                 "pages_repo":      {"type": "string", "title": "Pages Repo (owner/repo)", "default": ""},
                 "pages_branch":    {"type": "string", "title": "Pages Branch", "default": "main"},
@@ -74,23 +84,28 @@ class GitHubPlugin(GruPlugin):
 
     async def configure(self, config: dict) -> None:
         self._config = config
-        self._token: str | None = await load_secret(self.plugin_id, "token")
-        # If no stored token, try gh CLI auth
-        if not self._token:
+        self._token: Optional[str] = await load_secret(self.plugin_id, "token")
+        # Native-only: try gh CLI if no stored token and not in container
+        if not self._token and not is_container():
             self._token = await self._get_gh_cli_token()
             if self._token:
                 await store_secret(self.plugin_id, "token", self._token)
 
     async def health(self) -> PluginHealth:
         token = await load_secret(self.plugin_id, "token")
-        if not token:
-            # Try gh CLI as fallback
+
+        # Native-only fallback: try gh CLI
+        if not token and not is_container():
             token = await self._get_gh_cli_token()
             if token:
                 await store_secret(self.plugin_id, "token", token)
 
         if not token:
-            return PluginHealth(HealthStatus.ERROR, "No token — run 'gh auth login' or paste a PAT")
+            return PluginHealth(
+                HealthStatus.ERROR,
+                "Not authenticated — click Authorize to sign in via browser",
+                {"needs_auth": True},
+            )
 
         host = self._config.get("host", "github.com")
         url = f"https://{host}/api/v3/user" if host != "github.com" else "https://api.github.com/user"
@@ -101,7 +116,7 @@ class GitHubPlugin(GruPlugin):
                 login = resp.json().get("login", "?")
                 return PluginHealth(HealthStatus.HEALTHY, f"Authenticated as @{login}")
             elif resp.status_code == 401:
-                return PluginHealth(HealthStatus.ERROR, "Token expired or invalid — re-authorize")
+                return PluginHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser")
             else:
                 return PluginHealth(HealthStatus.DEGRADED, f"Unexpected status {resp.status_code}")
         except httpx.ConnectError:
@@ -109,9 +124,8 @@ class GitHubPlugin(GruPlugin):
         except Exception as exc:
             return PluginHealth(HealthStatus.ERROR, str(exc))
 
-    async def _get_gh_cli_token(self) -> str | None:
-        """Get token from gh CLI auth for this host."""
-        import asyncio
+    async def _get_gh_cli_token(self) -> Optional[str]:
+        """Get token from gh CLI auth (native mode only)."""
         host = self._config.get("host", "github.com")
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -127,32 +141,134 @@ class GitHubPlugin(GruPlugin):
         return None
 
     async def teardown(self) -> None:
-        pass  # No background tasks in base GitHub plugin
+        pass
+
+    # ── Auth status ───────────────────────────────────────────────────────────
+
+    async def auth_status(self) -> dict:
+        """Return current auth state: has_token, has_client_id, needs_manifest."""
+        token = await load_secret(self.plugin_id, "token")
+        client_id = await self._get_client_id()
+        host = self._config.get("host", "github.com")
+        return {
+            "has_token": token is not None,
+            "has_client_id": client_id is not None,
+            "needs_manifest": client_id is None and host != "github.com",
+            "host": host,
+        }
+
+    # ── GitHub App Manifest Flow ──────────────────────────────────────────────
+
+    def get_manifest(self) -> dict:
+        """Build the GitHub App manifest JSON for auto-registration."""
+        host = self._config.get("host", "github.com")
+        base_url = server_url()
+        return {
+            "name": f"Gru Server ({host})",
+            "url": base_url,
+            "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
+            "public": False,
+            "default_permissions": {
+                "issues": "write",
+                "pull_requests": "write",
+                "contents": "read",
+                "organization_projects": "admin",
+            },
+            "default_events": ["issues", "pull_request"],
+        }
+
+    async def complete_manifest_flow(self, code: str) -> dict:
+        """
+        Exchange the temporary code from manifest callback for app credentials.
+        Stores client_id + client_secret in the vault.
+        Returns the created app info.
+        """
+        host = self._config.get("host", "github.com")
+        api_base = f"https://{host}/api/v3" if host != "github.com" else "https://api.github.com"
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(
+                f"{api_base}/app-manifests/{code}/conversions",
+                headers={"Accept": "application/json"},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+        client_id = data.get("client_id", "")
+        client_secret = data.get("client_secret", "")
+
+        if not client_id:
+            raise ValueError("GitHub did not return a client_id")
+
+        # Store in vault
+        await store_secret(self.plugin_id, _APP_CLIENT_ID_KEY, client_id)
+        await store_secret(self.plugin_id, _APP_CLIENT_SECRET_KEY, client_secret)
+
+        logger.info("GitHub App registered for %s: client_id=%s", host, client_id[:8] + "…")
+        return {
+            "app_id": data.get("id"),
+            "app_name": data.get("name"),
+            "client_id": client_id,
+        }
 
     # ── OAuth Device Flow ─────────────────────────────────────────────────────
+
+    async def _get_client_id(self) -> Optional[str]:
+        """
+        Resolve the OAuth client_id for this host:
+          1. Vault (from manifest flow registration)
+          2. Environment variable GRU_GITHUB_{HOST}_CLIENT_ID
+          3. Built-in for github.com
+        """
+        # Check vault first (set by manifest flow)
+        vault_cid = await load_secret(self.plugin_id, _APP_CLIENT_ID_KEY)
+        if vault_cid:
+            return vault_cid
+
+        host = self._config.get("host", "github.com")
+        env_key = f"GRU_GITHUB_{host.upper().replace('.', '_').replace('-', '_')}_CLIENT_ID"
+        env_cid = os.environ.get(env_key)
+        if env_cid:
+            return env_cid
+
+        if host == "github.com":
+            return os.environ.get("GRU_GITHUB_CLIENT_ID")
+
+        return None
 
     async def start_device_flow(self) -> dict:
         """
         Initiate GitHub OAuth device flow.
         Returns: { verification_uri, user_code, device_code, expires_in, interval }
+        Raises ValueError if no client_id is available.
         """
+        client_id = await self._get_client_id()
+        if not client_id:
+            host = self._config.get("host", "github.com")
+            raise ValueError(
+                f"No OAuth client_id for {host}. "
+                "Register a GitHub App first via the manifest flow."
+            )
+
         host = self._config.get("host", "github.com")
         base = f"https://{host}" if host != "github.com" else "https://github.com"
-        # Scopes needed: repo + project + read:org
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{base}/login/device/code",
                 headers={"Accept": "application/json"},
-                data={"client_id": _get_client_id(host), "scope": "repo project read:org"},
+                data={"client_id": client_id, "scope": "repo project read:org"},
             )
             resp.raise_for_status()
             return resp.json()
 
-    async def poll_device_flow(self, device_code: str, interval: int = 5) -> str | None:
+    async def poll_device_flow(self, device_code: str, interval: int = 5) -> Optional[str]:
         """
         Poll for token. Returns token string when granted, None while pending.
-        Raises on error (expired, denied).
         """
+        client_id = await self._get_client_id()
+        if not client_id:
+            raise ValueError("No client_id — cannot poll device flow")
+
         host = self._config.get("host", "github.com")
         base = f"https://{host}" if host != "github.com" else "https://github.com"
         async with httpx.AsyncClient(timeout=15) as client:
@@ -160,7 +276,7 @@ class GitHubPlugin(GruPlugin):
                 f"{base}/login/oauth/access_token",
                 headers={"Accept": "application/json"},
                 data={
-                    "client_id":   _get_client_id(host),
+                    "client_id":   client_id,
                     "device_code": device_code,
                     "grant_type":  "urn:ietf:params:oauth:grant-type:device_code",
                 },
@@ -180,32 +296,10 @@ class GitHubPlugin(GruPlugin):
             return token
         return None
 
-    def token(self) -> str | None:
+    def token(self) -> Optional[str]:
         """Synchronous token accessor for docker_service."""
-        import asyncio
         try:
             loop = asyncio.get_event_loop()
             return loop.run_until_complete(load_secret(self.plugin_id, "token"))
         except Exception:
             return None
-
-
-def _get_client_id(host: str) -> str:
-    """
-    Return the OAuth App client_id for the given host.
-    For GHE instances, users must register their own OAuth app and
-    set GRU_GITHUB_{HOST}_CLIENT_ID in the environment.
-    """
-    import os
-    env_key = f"GRU_GITHUB_{host.upper().replace('.', '_')}_CLIENT_ID"
-    client_id = os.environ.get(env_key)
-    if not client_id:
-        # Fall back to a built-in client_id only for github.com
-        if host == "github.com":
-            client_id = os.environ.get("GRU_GITHUB_CLIENT_ID", "")
-        if not client_id:
-            raise ValueError(
-                f"OAuth client_id not configured for {host}. "
-                f"Set {env_key} environment variable or use PAT auth."
-            )
-    return client_id

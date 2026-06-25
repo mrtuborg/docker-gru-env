@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
 import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Plugins from './pages/Plugins'
@@ -12,6 +12,7 @@ import Agents from './pages/Agents'
 import SessionsPage from './pages/Sessions'
 import SettingsPage from './pages/Settings'
 import Wizard from './pages/Wizard'
+import AuthCallback from './pages/AuthCallback'
 
 function useTheme() {
   const [theme, setTheme] = useState<'dark'|'light'>(() =>
@@ -150,6 +151,7 @@ function AppShell() {
             <Route path="/sessions"      element={<SessionsPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/wizard"   element={<Wizard onComplete={() => { setNeedsSetup(false); navigate('/') }} />} />
+            <Route path="/auth-callback" element={<AuthCallback />} />
           </Routes>
         </main>
       </div>
@@ -159,8 +161,8 @@ function AppShell() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <AppShell />
-    </BrowserRouter>
+    </HashRouter>
   )
 }
