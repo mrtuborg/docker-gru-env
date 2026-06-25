@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { RefreshCw, Activity, Plug, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import HealthBadge from '../components/HealthBadge'
 
@@ -22,6 +23,7 @@ export default function Dashboard() {
   const [data, setData] = useState<any>(null)
   const [sessions, setSessions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const location = useLocation()
 
   const load = () => {
     setLoading(true)
@@ -34,7 +36,8 @@ export default function Dashboard() {
     }).finally(() => setLoading(false))
   }
 
-  useEffect(() => { load() }, [])
+  // Reload whenever we navigate to the dashboard (e.g. after auth callback)
+  useEffect(() => { load() }, [location.key])
 
   if (loading && !data) return (
     <div style={{ display:'flex', gap:12, alignItems:'center', color:'var(--muted)', padding:48 }}>
