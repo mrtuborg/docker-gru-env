@@ -135,7 +135,7 @@ class GitHubPlugin(GruPlugin):
         return {
             "name": f"Gru Server ({host})",
             "url": base_url,
-            "hook_attributes": {"url": base_url + "/api/webhooks/github"},
+            "hook_attributes": {"url": "https://example.com", "active": False},
             "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
             "public": True,
             "default_permissions": {
@@ -144,7 +144,7 @@ class GitHubPlugin(GruPlugin):
                 "contents": "read",
                 "organization_projects": "admin",
             },
-            "default_events": ["issues", "pull_request"],
+            "default_events": [],
         }
 
     async def complete_manifest_flow(self, code: str) -> dict:
