@@ -146,7 +146,12 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
     })
     return d
   }
-  const [values, setValues] = useState<Record<string, any>>(mkDefaults)
+  const [values, setValues] = useState<Record<string, any>>(() => {
+    const defaults = mkDefaults()
+    // Notify parent of defaults on mount so they get saved
+    setTimeout(() => onChange(defaults), 0)
+    return defaults
+  })
   const [showPw, setShowPw] = useState<Record<string, boolean>>({})
 
   const set = (key: string, val: any) => { const n = {...values, [key]: val}; setValues(n); onChange(n) }
