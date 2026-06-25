@@ -138,6 +138,8 @@ class GitHubPlugin(GruPlugin):
             "hook_attributes": {"url": "https://example.com", "active": False},
             "redirect_url": f"{base_url}/api/auth/github/manifest-callback",
             "public": True,
+            "request_oauth_on_install": True,
+            "device_flow_enabled": True,
             "default_permissions": {
                 "issues": "write",
                 "pull_requests": "write",
@@ -225,7 +227,10 @@ class GitHubPlugin(GruPlugin):
                 headers={"Accept": "application/json"},
                 data=payload,
             )
-            resp.raise_for_status()
+            if resp.status_code != 200:
+                body = resp.text
+                logger.error("Device flow start failed (%d): %s", resp.status_code, body)
+                raise ValueError(f"GitHub rejected device flow ({resp.status_code}): {body}")
             return resp.json()
 
     async def poll_device_flow(self, device_code: str, interval: int = 5) -> Optional[str]:
