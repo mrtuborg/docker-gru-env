@@ -1,10 +1,9 @@
 """
 Azure Plugin — manages Azure Blob Storage tokens with auto-refresh.
 
-Auth strategy (container-aware):
-  - browser:           Azure Device Code Flow (works in containers)
+Auth:
+  - browser:           Azure Device Code Flow (user signs in via microsoft.com/devicelogin)
   - service_principal:  tenant_id + client_id + client_secret (headless CI)
-  - (Native fallback):  `az account get-access-token` tried automatically
 """
 from __future__ import annotations
 
@@ -18,7 +17,6 @@ from typing import Optional
 import httpx
 
 from ..plugin_base import GruPlugin, PluginHealth, HealthStatus
-from ..runtime import is_container
 from ..vault import load_secret, store_secret
 
 logger = logging.getLogger(__name__)
@@ -85,8 +83,7 @@ class AzurePlugin(GruPlugin):
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
 
-        # Try to get an initial token
-        token = await self._get_best_token()
+        token = await load_secret(self.plugin_id, "access_token")
         if token:
             self._write_token_file(token)
             self._refresh_task = asyncio.create_task(self._refresh_loop())
@@ -97,14 +94,6 @@ class AzurePlugin(GruPlugin):
             return PluginHealth(HealthStatus.ERROR, "Storage account not configured")
 
         token = await load_secret(self.plugin_id, "access_token")
-
-        # Native fallback: try az CLI if no stored token
-        if not token and not is_container():
-            token = await self._get_az_cli_token()
-            if token:
-                await store_secret(self.plugin_id, "access_token", token)
-                self._write_token_file(token)
-
         if not token:
             return PluginHealth(
                 HealthStatus.ERROR,
@@ -119,9 +108,8 @@ class AzurePlugin(GruPlugin):
                 {"consecutive_failures": self._consecutive_failures, "needs_auth": True},
             )
 
-        token_file = _TOKEN_FILE
-        if token_file.exists():
-            age_s = time.time() - token_file.stat().st_mtime
+        if _TOKEN_FILE.exists():
+            age_s = time.time() - _TOKEN_FILE.stat().st_mtime
             if age_s > _TOKEN_REFRESH_INTERVAL + 600:
                 return PluginHealth(HealthStatus.DEGRADED, "Token file stale — refresh may have failed")
 
@@ -131,48 +119,17 @@ class AzurePlugin(GruPlugin):
         if self._refresh_task and not self._refresh_task.done():
             self._refresh_task.cancel()
 
-    # ── Token helpers ─────────────────────────────────────────────────────────
-
-    async def _get_best_token(self) -> Optional[str]:
-        """Try stored token, then az CLI (native only)."""
-        token = await load_secret(self.plugin_id, "access_token")
-        if token:
-            return token
-        if not is_container():
-            return await self._get_az_cli_token()
-        return None
+    # ── Token file ────────────────────────────────────────────────────────────
 
     def _write_token_file(self, token: str) -> None:
         _TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
         _TOKEN_FILE.write_text(token)
         _TOKEN_FILE.chmod(0o600)
 
-    async def _get_az_cli_token(self) -> Optional[str]:
-        """Get a storage token from the local az CLI session (native only)."""
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                "az", "account", "get-access-token",
-                "--resource", "https://storage.azure.com",
-                "--query", "accessToken", "-o", "tsv",
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode == 0 and stdout.strip():
-                return stdout.decode().strip()
-            logger.warning("az CLI token failed: %s", stderr.decode().strip())
-        except FileNotFoundError:
-            logger.debug("az CLI not found in PATH")
-        return None
-
     # ── Azure Device Code Flow ────────────────────────────────────────────────
 
     async def start_device_flow(self) -> dict:
-        """
-        Start Azure AD device code flow for storage access.
-        Uses the well-known Azure CLI public client_id.
-        Returns: { user_code, verification_uri, device_code, expires_in, interval, message }
-        """
+        """Start Azure AD device code flow for storage access."""
         tenant = self._config.get("tenant_id", "") or "organizations"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -195,10 +152,7 @@ class AzurePlugin(GruPlugin):
         }
 
     async def poll_device_flow(self, device_code: str, interval: int = 5) -> Optional[str]:
-        """
-        Poll Azure AD for token. Returns access_token when granted, None while pending.
-        Also stores the refresh_token for auto-refresh.
-        """
+        """Poll Azure AD for token. Also stores the refresh_token for auto-refresh."""
         tenant = self._config.get("tenant_id", "") or "organizations"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
@@ -225,11 +179,8 @@ class AzurePlugin(GruPlugin):
         if access_token:
             await store_secret(self.plugin_id, "access_token", access_token)
             self._write_token_file(access_token)
-            # Store refresh token for auto-refresh
-            refresh_token = data.get("refresh_token")
-            if refresh_token:
-                await store_secret(self.plugin_id, "refresh_token", refresh_token)
-            # Start refresh loop if not running
+            if data.get("refresh_token"):
+                await store_secret(self.plugin_id, "refresh_token", data["refresh_token"])
             if not self._refresh_task or self._refresh_task.done():
                 self._refresh_task = asyncio.create_task(self._refresh_loop())
             return access_token
@@ -263,10 +214,6 @@ class AzurePlugin(GruPlugin):
             if token:
                 return token
 
-        # Native fallback: az CLI
-        if not is_container():
-            return await self._get_az_cli_token()
-
         auth_method = self._config.get("auth_method", "browser")
         if auth_method == "service_principal":
             return await self._refresh_service_principal()
@@ -289,7 +236,6 @@ class AzurePlugin(GruPlugin):
                 )
                 data = resp.json()
             if "access_token" in data:
-                # Update refresh_token if rotated
                 if data.get("refresh_token"):
                     await store_secret(self.plugin_id, "refresh_token", data["refresh_token"])
                 return data["access_token"]

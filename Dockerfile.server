@@ -29,8 +29,7 @@ COPY --from=web-build /app/server/static ./server/static
 
 # Runtime defaults
 ENV GRU_DATA_DIR=/data \
-    GRU_PORT=9400 \
-    GRU_IN_CONTAINER=1
+    GRU_PORT=9400
 
 VOLUME ["/data"]
 EXPOSE 9400
