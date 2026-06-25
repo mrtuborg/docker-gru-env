@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { CheckCircle2, GitBranch, Bot, Cloud, FileText, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react'
+import { CheckCircle2, GitBranch, Bot, Cloud, Vault, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react'
 import ConnectorConfigForm from '../components/ConnectorConfigForm'
 import OAuthModal from '../components/OAuthModal'
 
@@ -7,7 +7,7 @@ const PLUGIN_TYPES = [
   { id:'github',   name:'GitHub',          icon: GitBranch, color:'#58a6ff', desc:'Project board watcher, cost reporting, session attribution' },
   { id:'copilot',  name:'GitHub Copilot',  icon: Bot,       color:'#3fb950', desc:'Runs Copilot CLI sessions via the web UI. Uses your GitHub connector token — no separate login needed.' },
   { id:'azure',    name:'Azure Storage',   icon: Cloud,     color:'#79c0ff', desc:'Azure Blob Storage access for firmware bundles' },
-  { id:'obsidian', name:'Obsidian Kanban', icon: FileText,  color:'#bc8cff', desc:'Syncs your Obsidian vault via Obsidian Sync and watches a Kanban board. Requires an active Obsidian Sync subscription.' },
+  { id:'obsidian', name:'Obsidian Sync',   icon: Vault,     color:'#bc8cff', desc:'Pulls your vault from Obsidian Sync and watches a Kanban board for tasks. Requires an Obsidian Sync subscription.' },
 ]
 
 interface WizardProps { onComplete: () => void }

@@ -76,7 +76,7 @@ export default function Dashboard() {
             {data.connectors.map((p: any) => (
               <div key={p.id} className="card" style={{ padding:'16px 16px 12px' }}>
                 <div style={{ fontSize:22, marginBottom:6 }}>
-                  {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : '📝'}
+                  {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : p.plugin_type === 'obsidian' ? '🔮' : '📝'}
                 </div>
                 <div style={{ fontWeight:600, fontSize:13, marginBottom:6 }}>{p.display_name}</div>
                 <HealthBadge status={p.health?.status} message={p.health?.message}/>
