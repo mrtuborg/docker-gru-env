@@ -62,6 +62,8 @@ class AzurePlugin(GruPlugin):
                     "default": "sas_token",
                 },
                 "storage_account": {"type": "string", "title": "Storage Account Name"},
+                "subscription_id": {"type": "string", "title": "Subscription ID"},
+                "resource_group":  {"type": "string", "title": "Resource Group"},
                 "container":       {"type": "string", "title": "Blob Container Name", "default": ""},
                 "sas_token": {
                     "type": "string", "title": "SAS Token",

@@ -77,14 +77,18 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'SAS Token: generate from Azure Portal → Storage Account → Shared access signature.' },
     { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, wizard: true,
       hint: 'Azure Storage account name.' },
+    { key: 'subscription_id', label: 'Subscription ID',    type: 'text',   placeholder: 'cafb472d-94f8-4b59-bdcc-7eb10b0e6fde', wizard: true,
+      hint: 'Azure Subscription ID — used to build a direct link to the SAS page. Find it in Azure Portal → Subscriptions.' },
+    { key: 'resource_group',  label: 'Resource Group',     type: 'text',   placeholder: 'rg-roommate-esw-prod', wizard: true,
+      hint: 'Resource group that contains this storage account.' },
     { key: 'container',       label: 'Container Name',     type: 'text',   placeholder: 'firmware', wizard: true,
       hint: 'Default blob container name.' },
     { key: '_sas_portal_link', label: '', type: 'link-button' as any, wizard: true,
       showWhen: { field: 'auth_method', value: 'sas_token' },
-      hint: 'In Azure Portal: go to your storage account (e.g. rmeswprod) → left sidebar → "Security + networking" → "Shared access signature" → set permissions and expiry → click "Generate SAS and connection string" → copy the SAS token field.' },
+      hint: 'Opens the Shared access signature page directly. If Subscription ID and Resource Group are filled in above, the link goes straight to the SAS page for this account. Otherwise opens portal.azure.com.' },
     { key: 'sas_token',       label: 'SAS Token',          type: 'password', wizard: true,
       placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...',
-      hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.',
+      hint: 'Paste the full SAS token starting with "?sv=". In Azure Portal: set permissions + expiry → click "Generate SAS and connection string" → copy the "SAS token" field.',
       showWhen: { field: 'auth_method', value: 'sas_token' } },
     { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', wizard: true,
       hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
@@ -243,12 +247,18 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
                 </select>
               ) : (f.type as string) === 'link-button' ? (
                 (() => {
+                  const acct = values['storage_account']
+                  const sub  = values['subscription_id']
+                  const rg   = values['resource_group']
+                  const url = (acct && sub && rg)
+                    ? `https://portal.azure.com/#resource/subscriptions/${sub}/resourceGroups/${rg}/providers/Microsoft.Storage/storageAccounts/${acct}/sas`
+                    : 'https://portal.azure.com'
                   return (
-                    <a href="https://portal.azure.com" target="_blank" rel="noopener noreferrer"
+                    <a href={url} target="_blank" rel="noopener noreferrer"
                       style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'8px 14px',
                         background:'var(--accent)', color:'#fff', borderRadius:6, fontSize:13,
                         fontWeight:500, textDecoration:'none', width:'fit-content' }}>
-                      <ExternalLink size={14}/> Open Azure Portal
+                      <ExternalLink size={14}/> Open Shared access signature in Azure Portal
                     </a>
                   )
                 })()
