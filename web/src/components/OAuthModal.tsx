@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Check, X } from 'lucide-react'
 
-interface OAuthModalProps { pluginId: string; onClose: () => void }
+interface OAuthModalProps { pluginId: string; onClose: () => void; inline?: boolean }
 
-export default function OAuthModal({ pluginId, onClose }: OAuthModalProps) {
+export default function OAuthModal({ pluginId, onClose, inline }: OAuthModalProps) {
   const [flowData, setFlowData] = useState<any>(null)
   const [status, setStatus] = useState<'loading'|'waiting'|'success'|'error'>('loading')
   const [message, setMessage] = useState('')
@@ -59,8 +59,7 @@ export default function OAuthModal({ pluginId, onClose }: OAuthModalProps) {
   const mins = Math.floor(countdown / 60).toString().padStart(2,'0')
   const secs = (countdown % 60).toString().padStart(2,'0')
 
-  return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+  const content = (
       <div className="modal-card">
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20 }}>
           <div style={{ fontWeight:700, fontSize:16 }}>🔗 Authorize Plugin</div>
@@ -118,6 +117,12 @@ export default function OAuthModal({ pluginId, onClose }: OAuthModalProps) {
           </div>
         )}
       </div>
+  )
+
+  if (inline) return content
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      {content}
     </div>
   )
 }

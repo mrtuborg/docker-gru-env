@@ -94,7 +94,8 @@ export default function AuthCallback() {
         {phase === 'device_flow' && (
           <OAuthModal
             pluginId={pluginId}
-            onClose={() => setPhase('done')}
+            onClose={() => navigate('/')}
+            inline
           />
         )}
 

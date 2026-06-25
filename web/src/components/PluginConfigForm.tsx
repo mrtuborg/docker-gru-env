@@ -12,71 +12,110 @@ interface Field {
   defaultValue?: string | number | boolean
   mono?: boolean
   showWhen?: { field: string; value: string }
+  /** If true, shown in the wizard (connect) phase. All fields appear in settings. */
+  wizard?: boolean
 }
 
 const PLUGIN_FIELDS: Record<string, Field[]> = {
   github: [
-    // Required
-    { key: 'host',            label: 'GitHub Host',        type: 'text',   placeholder: 'github.com',   hint: 'Hostname only — no https://. Use GHE hostname for enterprise.', defaultValue: 'github.com', required: true },
-    { key: 'data_repo',       label: 'Data Repository',    type: 'text',   placeholder: 'owner/repo',   hint: 'Repo that stores session logs, cost reports, and attribution DB.', required: true },
-    { key: 'project_owner',   label: 'Project Owner',      type: 'text',   placeholder: 'owner or org', hint: 'GitHub user/org that owns the Projects v2 board.', required: true },
-    { key: 'project_number',  label: 'Project Number',     type: 'number', placeholder: '1',            hint: 'GitHub Projects v2 board number (integer).', required: true },
-    // Auth
-    { key: 'token',           label: 'Personal Access Token', type: 'password', placeholder: 'Leave blank to authorize via browser (recommended)', hint: 'Leave blank — you will be redirected to authorize via browser after saving. Only paste a PAT if you prefer manual token management.' },
+    // Wizard: just the host — auth is handled by OAuth redirect
+    { key: 'host', label: 'GitHub Host', type: 'text', placeholder: 'github.com',
+      hint: 'Hostname only — no https://. Use GHE hostname for enterprise.', defaultValue: 'github.com', required: true, wizard: true },
+    // Settings: board and repos
+    { key: 'board_url',     label: 'Project Board URL',  type: 'text',   placeholder: 'https://github.com/orgs/myorg/projects/5',
+      hint: 'Full URL of the GitHub Projects v2 board. Owner and number are parsed automatically.' },
+    { key: 'data_repo',     label: 'Data Repository',    type: 'text',   placeholder: 'owner/repo',
+      hint: 'Repo that stores session logs, cost reports, and attribution DB.' },
     // Pages
-    { key: 'pages_repo',      label: 'Pages Repository',   type: 'text',   placeholder: 'owner/repo (optional)', hint: 'GitHub Pages repo for publishing the cost/session dashboard.' },
-    { key: 'pages_branch',    label: 'Pages Branch',       type: 'text',   placeholder: 'main', defaultValue: 'main', hint: 'Branch to push the generated Pages site to.' },
+    { key: 'pages_repo',    label: 'Pages Repository',   type: 'text',   placeholder: 'owner/repo (optional)',
+      hint: 'GitHub Pages repo for publishing the cost/session dashboard.' },
+    { key: 'pages_branch',  label: 'Pages Branch',       type: 'text',   placeholder: 'main', defaultValue: 'main',
+      hint: 'Branch to push the generated Pages site to.' },
     // Cost attribution
-    { key: 'allowed_repos',   label: 'Allowed Repositories', type: 'taglist', placeholder: 'owner/repo — press Enter to add', hint: 'Repos whose sessions are attributed to this project board. Defaults to [data_repo] if empty.' },
-    { key: 'repo_aliases',    label: 'Repository Aliases', type: 'textarea', mono: true, placeholder: 'owner/repo-fork: owner/canonical-repo\nowner/another: owner/canonical', hint: 'YAML map — forks/mirrors mapped to their canonical repo for cost attribution.' },
-    { key: 'repo_projects',   label: 'Repo → Project Map', type: 'textarea', mono: true, placeholder: 'owner/some-repo: 13\nowner/other-repo: 8', hint: 'YAML map — repos with no issue refs attributed to this project number.' },
+    { key: 'allowed_repos', label: 'Allowed Repositories', type: 'taglist', placeholder: 'owner/repo — press Enter to add',
+      hint: 'Repos whose sessions are attributed to this project board. Defaults to [data_repo] if empty.' },
+    { key: 'repo_aliases',  label: 'Repository Aliases', type: 'textarea', mono: true,
+      placeholder: 'owner/repo-fork: owner/canonical-repo', hint: 'YAML map — forks/mirrors mapped to their canonical repo.' },
+    { key: 'repo_projects', label: 'Repo → Project Map', type: 'textarea', mono: true,
+      placeholder: 'owner/some-repo: 13', hint: 'YAML map — repos with no issue refs attributed to this project number.' },
   ],
   copilot: [
-    // Workspace
-    { key: 'working_dir',     label: 'Default Working Directory', type: 'text', placeholder: '/workspace', hint: 'Default cwd for Copilot sessions inside the container.' },
-    { key: 'board_dir',       label: 'Board Directory',    type: 'text',   placeholder: 'hil-stress', defaultValue: 'hil-stress', hint: 'Subdirectory inside the workspace repo that contains config.yml and stage handlers (BOARD_DIR env var).' },
-    { key: 'extensions_dir',  label: 'Extensions Directory', type: 'text', placeholder: '~/.config/copilot/extensions', hint: 'Path to custom Copilot extensions available inside the container.' },
-    { key: 'linked_repos',    label: 'Linked Repositories', type: 'taglist', placeholder: 'name=https://github.com/owner/repo', hint: 'Extra repos to clone into the container. Format: name=url (one per line).' },
-    // Watcher behaviour
-    { key: 'watcher_prompts_dir',           label: 'Prompts Directory',         type: 'text',   placeholder: './prompts', hint: 'Path (relative to board_dir) with custom stage handler .md files. Files named {Stage}.md override built-in handlers.' },
-    { key: 'watcher_stage_order',           label: 'Stage Order',               type: 'text',   placeholder: 'Todo, In progress', defaultValue: 'Todo, In progress', hint: 'Comma-separated board column names processed in order by the watcher.' },
-    { key: 'watcher_poll_interval',         label: 'Poll Interval (s)',         type: 'number', placeholder: '300',  defaultValue: 300,  hint: 'Seconds to sleep between watcher cycles when no issues are ready.' },
-    { key: 'watcher_max_issues',            label: 'Max Issues per Run',        type: 'number', placeholder: '50',   defaultValue: 50,   hint: 'Safety cap on total issues processed per watcher run.' },
-    { key: 'watcher_max_per_issue',         label: 'Max Attempts per Issue',    type: 'number', placeholder: '3',                       hint: 'Maximum retries per issue in one run (prevents infinite loops).' },
-    { key: 'watcher_session_timeout_hours', label: 'Session Timeout (h)',       type: 'number', placeholder: '2',                       hint: 'Hours before a running Copilot session is killed and marked failed.' },
-    { key: 'watcher_pause_between_sessions',label: 'Pause Between Sessions (s)',type: 'number', placeholder: '0',    defaultValue: 0,    hint: 'Seconds to wait between consecutive Copilot sessions.' },
-    // Model fallback
-    { key: 'watcher_models',  label: 'Model Fallback List', type: 'model-list', hint: 'Ordered list of models. Priority 1 = preferred; higher = cheaper fallback after 3 consecutive failures.' },
+    // Wizard: essential workspace settings
+    { key: 'working_dir',   label: 'Default Working Directory', type: 'text', placeholder: '/workspace',
+      hint: 'Default cwd for Copilot sessions inside the container.', wizard: true },
+    { key: 'board_dir',     label: 'Board Directory',    type: 'text',   placeholder: 'hil-stress', defaultValue: 'hil-stress',
+      hint: 'Subdirectory inside the workspace repo that contains config.yml and stage handlers.', wizard: true },
+    // Settings: advanced watcher config
+    { key: 'extensions_dir', label: 'Extensions Directory', type: 'text', placeholder: '~/.config/copilot/extensions',
+      hint: 'Path to custom Copilot extensions available inside the container.' },
+    { key: 'linked_repos',  label: 'Linked Repositories', type: 'taglist', placeholder: 'name=https://github.com/owner/repo',
+      hint: 'Extra repos to clone into the container. Format: name=url.' },
+    { key: 'watcher_prompts_dir',            label: 'Prompts Directory',          type: 'text',   placeholder: './prompts',
+      hint: 'Path (relative to board_dir) with custom stage handler .md files.' },
+    { key: 'watcher_stage_order',            label: 'Stage Order',                type: 'text',   placeholder: 'Todo, In progress', defaultValue: 'Todo, In progress',
+      hint: 'Comma-separated board column names processed in order by the watcher.' },
+    { key: 'watcher_poll_interval',          label: 'Poll Interval (s)',          type: 'number', placeholder: '300',  defaultValue: 300,
+      hint: 'Seconds to sleep between watcher cycles when no issues are ready.' },
+    { key: 'watcher_max_issues',             label: 'Max Issues per Run',         type: 'number', placeholder: '50',   defaultValue: 50,
+      hint: 'Safety cap on total issues processed per watcher run.' },
+    { key: 'watcher_max_per_issue',          label: 'Max Attempts per Issue',     type: 'number', placeholder: '3',
+      hint: 'Maximum retries per issue in one run (prevents infinite loops).' },
+    { key: 'watcher_session_timeout_hours',  label: 'Session Timeout (h)',        type: 'number', placeholder: '2',
+      hint: 'Hours before a running Copilot session is killed and marked failed.' },
+    { key: 'watcher_pause_between_sessions', label: 'Pause Between Sessions (s)', type: 'number', placeholder: '0', defaultValue: 0,
+      hint: 'Seconds to wait between consecutive Copilot sessions.' },
+    { key: 'watcher_models', label: 'Model Fallback List', type: 'model-list',
+      hint: 'Ordered list of models. Priority 1 = preferred; higher = cheaper fallback after 3 consecutive failures.' },
   ],
   azure: [
-    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'sas_token',
+    // All azure fields are wizard fields — auth is the whole point
+    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'sas_token', wizard: true,
       options: [
         { value: 'sas_token',         label: 'SAS Token (paste from Azure Portal)' },
         { value: 'service_principal', label: 'Service Principal (client ID + secret)' },
       ],
-      hint: 'SAS Token: generate from Azure Portal → Storage Account → Shared access signature. No IT admin needed.' },
-    { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, hint: 'Azure Storage account name.' },
-    { key: 'container',       label: 'Container Name',     type: 'text',   placeholder: 'firmware', hint: 'Default blob container name.' },
-    { key: '_sas_portal_link', label: '',                   type: 'link-button' as any, showWhen: { field: 'auth_method', value: 'sas_token' },
+      hint: 'SAS Token: generate from Azure Portal → Storage Account → Shared access signature.' },
+    { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, wizard: true,
+      hint: 'Azure Storage account name.' },
+    { key: 'container',       label: 'Container Name',     type: 'text',   placeholder: 'firmware', wizard: true,
+      hint: 'Default blob container name.' },
+    { key: '_sas_portal_link', label: '', type: 'link-button' as any, wizard: true,
+      showWhen: { field: 'auth_method', value: 'sas_token' },
       hint: 'Opens Azure Portal → Shared access signature page for this storage account.' },
-    { key: 'sas_token',       label: 'SAS Token',          type: 'password', placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...', hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.', showWhen: { field: 'auth_method', value: 'sas_token' } },
-    { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
-    { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
-    { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+    { key: 'sas_token',       label: 'SAS Token',          type: 'password', wizard: true,
+      placeholder: '?sv=2022-11-02&ss=b&srt=sco&sp=rl&se=...',
+      hint: 'Paste the full SAS token starting with "?sv=". Copy from the Azure Portal page above.',
+      showWhen: { field: 'auth_method', value: 'sas_token' } },
+    { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', wizard: true,
+      hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+    { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', wizard: true,
+      hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+    { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', wizard: true,
+      hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
   ],
   obsidian: [
-    { key: 'board_path',      label: 'Board File Path',    type: 'text',   placeholder: '/path/to/kanban.md', required: true, hint: 'Absolute path to the Obsidian Kanban markdown file.' },
-    { key: 'watch_column',    label: 'Watch Column',       type: 'text',   placeholder: 'Todo',   required: true, hint: 'Column name to pick cards from for processing.' },
-    { key: 'done_column',     label: 'Done Column',        type: 'text',   placeholder: 'Done',   hint: 'Column to move cards to after a session completes.' },
-    { key: 'auto_mark_done',  label: 'Auto-mark Done',     type: 'checkbox', hint: 'Move card to Done column when the Copilot session finishes successfully.', defaultValue: true },
-    { key: 'dry_run',         label: 'Dry Run',            type: 'checkbox', hint: "Plan sessions but don't move cards or commit results.", defaultValue: false },
+    { key: 'board_path',  label: 'Board File Path', type: 'text', placeholder: '/path/to/kanban.md', required: true, wizard: true,
+      hint: 'Absolute path to the Obsidian Kanban markdown file.' },
+    { key: 'watch_column', label: 'Watch Column',   type: 'text', placeholder: 'Todo', required: true, wizard: true,
+      hint: 'Column name to pick cards from for processing.' },
+    { key: 'done_column',  label: 'Done Column',    type: 'text', placeholder: 'Done', wizard: true,
+      hint: 'Column to move cards to after a session completes.' },
+    { key: 'auto_mark_done', label: 'Auto-mark Done', type: 'checkbox', defaultValue: true,
+      hint: 'Move card to Done column when the Copilot session finishes successfully.' },
+    { key: 'dry_run', label: 'Dry Run', type: 'checkbox', defaultValue: false,
+      hint: "Plan sessions but don't move cards or commit results." },
   ],
   docker: [
-    { key: 'cw_image',           label: 'Docker Image',        type: 'text',   placeholder: 'gru:local',        defaultValue: 'gru:local',        hint: 'Docker image used to run Copilot sessions.' },
-    { key: 'cw_data_volume',     label: 'Data Volume',         type: 'text',   placeholder: 'gru-data',         defaultValue: 'gru-data',         hint: 'Named volume for Copilot data (model cache, auth tokens) mounted at /data/copilot.' },
-    { key: 'cw_logs_volume',     label: 'Logs Volume',         type: 'text',   placeholder: 'gru-logs',         defaultValue: 'gru-logs',         hint: 'Named volume where session logs are written.' },
-    { key: 'cw_instruct_volume', label: 'Instructions Volume', type: 'text',   placeholder: 'gru-instructions', defaultValue: 'gru-instructions', hint: 'Named volume for custom instruction files, mounted at /data/instructions.' },
-    { key: 'cw_ssh_path',        label: 'SSH Keys Path',       type: 'text',   placeholder: '~/.ssh',           defaultValue: '~/.ssh',           hint: 'Host path mounted read-only as /root/.ssh inside the container.' },
+    { key: 'cw_image',           label: 'Docker Image',        type: 'text', placeholder: 'gru:local',        defaultValue: 'gru:local',        wizard: true,
+      hint: 'Docker image used to run Copilot sessions.' },
+    { key: 'cw_data_volume',     label: 'Data Volume',         type: 'text', placeholder: 'gru-data',         defaultValue: 'gru-data',
+      hint: 'Named volume for Copilot data mounted at /data/copilot.' },
+    { key: 'cw_logs_volume',     label: 'Logs Volume',         type: 'text', placeholder: 'gru-logs',         defaultValue: 'gru-logs',
+      hint: 'Named volume where session logs are written.' },
+    { key: 'cw_instruct_volume', label: 'Instructions Volume', type: 'text', placeholder: 'gru-instructions', defaultValue: 'gru-instructions',
+      hint: 'Named volume for custom instruction files, mounted at /data/instructions.' },
+    { key: 'cw_ssh_path',        label: 'SSH Keys Path',       type: 'text', placeholder: '~/.ssh',           defaultValue: '~/.ssh',
+      hint: 'Host path mounted read-only as /root/.ssh inside the container.' },
   ],
 }
 
@@ -136,10 +175,13 @@ interface Props {
   pluginType: string
   initialValues?: Record<string, any>
   onChange: (values: Record<string, any>) => void
+  /** 'wizard' shows only connection/auth fields; 'settings' (default) shows all fields */
+  phase?: 'wizard' | 'settings'
 }
 
-export default function PluginConfigForm({ pluginType, initialValues = {}, onChange }: Props) {
-  const fields = PLUGIN_FIELDS[pluginType] || []
+export default function PluginConfigForm({ pluginType, initialValues = {}, onChange, phase = 'settings' }: Props) {
+  const allFields = PLUGIN_FIELDS[pluginType] || []
+  const fields = phase === 'wizard' ? allFields.filter(f => f.wizard) : allFields
   const mkDefaults = () => {
     const d: Record<string, any> = {}
     fields.forEach(f => {

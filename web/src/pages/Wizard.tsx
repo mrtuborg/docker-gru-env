@@ -216,9 +216,9 @@ export default function Wizard({ onComplete }: WizardProps) {
                 <currentTypeMeta.icon size={20} color={currentTypeMeta.color}/>
               </div>
               <div>
-                <h2 style={{ fontSize:17, fontWeight:700, marginBottom:2 }}>Configure {currentTypeMeta.name}</h2>
+                <h2 style={{ fontSize:17, fontWeight:700, marginBottom:2 }}>Connect {currentTypeMeta.name}</h2>
                 <div style={{ fontSize:11, color:'var(--muted)' }}>
-                  Plugin {configStep + 1} of {selected.length}
+                  Step {configStep + 1} of {selected.length} — configure details later in plugin settings
                   {selected.length > 1 && (
                     <span style={{ marginLeft:8 }}>
                       {selected.map((id, i) => (
@@ -238,6 +238,7 @@ export default function Wizard({ onComplete }: WizardProps) {
               pluginType={currentTypeMeta.id}
               initialValues={configs[currentTypeMeta.id] || {}}
               onChange={vals => setConfigs(c => ({ ...c, [currentTypeMeta.id]: vals }))}
+              phase="wizard"
             />
 
             {error && <div style={{ color:'var(--red)', fontSize:12, marginTop:12 }}>⚠ {error}</div>}

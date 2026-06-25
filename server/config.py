@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -282,7 +283,30 @@ async def get_plugin(plugin_id: str) -> dict | None:
             return dict(row) if row else None
 
 
+def _parse_board_url(url: str) -> tuple[str, int]:
+    """Parse a GitHub Projects v2 URL into (owner, number).
+
+    Supports:
+      https://HOST/orgs/OWNER/projects/N
+      https://HOST/users/OWNER/projects/N
+      https://HOST/OWNER/projects/N  (user shorthand)
+    Returns ("", 0) if the URL cannot be parsed.
+    """
+    m = re.search(r"/(?:orgs|users)/([^/]+)/projects/(\d+)", url)
+    if not m:
+        m = re.search(r"/([^/]+)/projects/(\d+)", url)
+    if m:
+        return m.group(1), int(m.group(2))
+    return "", 0
+
+
 async def upsert_plugin(plugin_id: str, plugin_type: str, config: dict, enabled: bool = True) -> None:
+    # Parse board_url → project_owner + project_number for GitHub plugins
+    if plugin_type == "github" and config.get("board_url"):
+        owner, number = _parse_board_url(config["board_url"])
+        if owner and number:
+            config = {**config, "project_owner": owner, "project_number": number}
+
     config_json = json.dumps(config)
     async with aiosqlite.connect(get_db_path()) as db:
         await db.execute(

@@ -50,9 +50,10 @@ class GitHubPlugin(GruPlugin):
     def config_schema(cls) -> dict:
         return {
             "type": "object",
-            "required": ["host", "project_owner", "project_number"],
+            "required": ["host"],
             "properties": {
                 "host":            {"type": "string", "title": "GitHub Host", "default": "github.com"},
+                "board_url":       {"type": "string", "title": "Project Board URL"},
                 "data_repo":       {"type": "string", "title": "Data Repo (owner/repo)"},
                 "pages_repo":      {"type": "string", "title": "Pages Repo (owner/repo)", "default": ""},
                 "pages_branch":    {"type": "string", "title": "Pages Branch", "default": "main"},
@@ -292,6 +293,7 @@ class GitHubPlugin(GruPlugin):
             )
             data = resp.json()
 
+        logger.debug("Device poll response: %s", data)
         error = data.get("error")
         if error == "authorization_pending":
             return None
