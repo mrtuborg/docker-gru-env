@@ -79,20 +79,26 @@ export default function Wizard({ onComplete }: WizardProps) {
       for (const typeId of selected) {
         const pluginId = pluginIds[typeId]
         const cfg = configs[typeId] || {}
-        // Only GitHub needs browser OAuth; Azure/Copilot/Obsidian use pasted credentials
-        if (typeId !== 'github') continue
-        // Skip if user already provided a PAT
-        if (cfg.token) continue
 
-        const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
-        if (!statusResp.ok) continue
-        const authStatus = await statusResp.json()
-        if (authStatus.has_token) continue
-
-        if (authStatus.needs_manifest) {
-          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
-        } else if (authStatus.has_client_id) {
-          pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+        if (typeId === 'github') {
+          // Skip if user already provided a PAT
+          if (cfg.token) continue
+          const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
+          if (!statusResp.ok) continue
+          const authStatus = await statusResp.json()
+          if (authStatus.has_token) continue
+          if (authStatus.needs_manifest) {
+            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'manifest' })
+          } else if (authStatus.has_client_id) {
+            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+          }
+        } else if (typeId === 'azure' && cfg.auth_method === 'azure_ad') {
+          const statusResp = await fetch(`/api/plugins/${pluginId}/auth/status`)
+          if (!statusResp.ok) continue
+          const authStatus = await statusResp.json()
+          if (!authStatus.has_token) {
+            pendingAuth.push({ pluginId, pluginType: typeId, flow: 'device' })
+          }
         }
       }
 

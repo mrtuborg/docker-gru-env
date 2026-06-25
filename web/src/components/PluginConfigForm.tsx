@@ -11,7 +11,7 @@ interface Field {
   options?: { value: string; label: string }[]
   defaultValue?: string | number | boolean
   mono?: boolean
-  showWhen?: { field: string; value: string }
+  showWhen?: { field: string; value: string } | { field: string; values: string[] }
   /** If true, shown in the wizard (connect) phase. All fields appear in settings. */
   wizard?: boolean
 }
@@ -69,12 +69,13 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
   ],
   azure: [
     // All azure fields are wizard fields — auth is the whole point
-    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'sas_token', wizard: true,
+    { key: 'auth_method',     label: 'Auth Method',        type: 'select', required: true, defaultValue: 'azure_ad', wizard: true,
       options: [
+        { value: 'azure_ad',          label: 'Azure AD — device flow (recommended)' },
         { value: 'sas_token',         label: 'SAS Token (paste from Azure Portal)' },
         { value: 'service_principal', label: 'Service Principal (client ID + secret)' },
       ],
-      hint: 'SAS Token: generate from Azure Portal → Storage Account → Shared access signature.' },
+      hint: 'Azure AD: authorize interactively — token auto-renews. SAS Token: 7-day limit.' },
     { key: 'storage_account', label: 'Storage Account',    type: 'text',   placeholder: 'rmeswprod', required: true, wizard: true,
       hint: 'Azure Storage account name.' },
     { key: 'subscription_id', label: 'Subscription ID',    type: 'text',   placeholder: 'cafb472d-94f8-4b59-bdcc-7eb10b0e6fde', wizard: true,
@@ -91,9 +92,11 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'Paste the full SAS token starting with "?sv=". In Azure Portal: set permissions + expiry → click "Generate SAS and connection string" → copy the "SAS token" field.',
       showWhen: { field: 'auth_method', value: 'sas_token' } },
     { key: 'tenant_id',       label: 'Tenant ID',          type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', wizard: true,
-      hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+      hint: 'Required for Azure AD and Service Principal auth. Run: az account show --query tenantId -o tsv',
+      showWhen: { field: 'auth_method', values: ['azure_ad', 'service_principal'] } },
     { key: 'client_id',       label: 'Client ID (App ID)', type: 'text',   placeholder: 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', wizard: true,
-      hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
+      hint: 'Azure AD: register a public client app → enable device flow → add Azure Storage user_impersonation permission. Service Principal: app registration client ID.',
+      showWhen: { field: 'auth_method', values: ['azure_ad', 'service_principal'] } },
     { key: 'client_secret',   label: 'Client Secret',      type: 'password', placeholder: '…', wizard: true,
       hint: 'Required for Service Principal auth only.', showWhen: { field: 'auth_method', value: 'service_principal' } },
   ],
@@ -209,7 +212,11 @@ export default function PluginConfigForm({ pluginType, initialValues = {}, onCha
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {fields.filter(f => {
-        if (f.showWhen) return values[f.showWhen.field] === f.showWhen.value
+        if (f.showWhen) {
+          const sw = f.showWhen as any
+          if ('values' in sw) return (sw.values as string[]).includes(values[sw.field])
+          return values[sw.field] === sw.value
+        }
         return true
       }).map(f => (
         <div key={f.key}>
