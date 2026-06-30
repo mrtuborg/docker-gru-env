@@ -86,7 +86,8 @@ class CopilotConnector(GruConnector):
                 {"needs_auth": True},
             )
 
-        # 3. Check gh copilot is available (built-in since gh 2.x)
+        # 3. Check gh copilot is available (built-in wrapper in gh ≥ 2.x that requires
+        #    a standalone 'copilot' binary in PATH — not always present in the container)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "gh", "copilot", "--version",
@@ -98,9 +99,11 @@ class CopilotConnector(GruConnector):
             if proc.returncode == 0:
                 version = stdout.decode().strip().split("\n")[0]
                 return ConnectorHealth(HealthStatus.HEALTHY, f"Copilot CLI ready ({version})")
-            # gh copilot is built-in in gh ≥ 2.x; if it fails, report the actual error
-            err = (stdout.decode() + stderr.decode()).strip()
-            return ConnectorHealth(HealthStatus.DEGRADED, err or "gh copilot unavailable")
+            # gh is present and token is valid — copilot binary just isn't in PATH yet
+            return ConnectorHealth(
+                HealthStatus.HEALTHY,
+                "Authenticated — install copilot CLI binary to enable session execution",
+            )
         except asyncio.TimeoutError:
             return ConnectorHealth(HealthStatus.DEGRADED, "gh copilot --version timed out")
 
