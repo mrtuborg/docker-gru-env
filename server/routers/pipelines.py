@@ -167,10 +167,10 @@ async def update(pipeline_id: str, body: PipelineUpdate):
     merged = {**existing}
     for k, v in body.model_dump(exclude_unset=True).items():
         merged[k] = v
-    # Ensure stages are dicts (from Pydantic models)
+    # Normalize stages: DB returns column_name, upsert expects column
     if "stages" in merged and merged["stages"]:
         merged["stages"] = [
-            s.model_dump() if hasattr(s, "model_dump") else s
+            _fix_stage_keys(s.model_dump() if hasattr(s, "model_dump") else s)
             for s in merged["stages"]
         ]
     await upsert_pipeline(merged)

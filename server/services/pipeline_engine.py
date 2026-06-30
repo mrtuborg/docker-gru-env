@@ -343,6 +343,7 @@ class PipelineEngine:
             result = await self._run_session(
                 pipeline, issue, prompt, current_model,
                 agent_name=agent_id if agent_data else "",
+                token=token,
             )
             ended_at = datetime.now(timezone.utc).isoformat()
 
@@ -604,13 +605,14 @@ class PipelineEngine:
 
     async def _run_session(
         self, pipeline: dict, issue: BoardIssue, prompt: str, model: str,
-        agent_name: str = "",
+        agent_name: str = "", token: str = "",
     ) -> SessionResult:
         """Execute a Copilot session as a subprocess."""
         timeout_hours = pipeline.get("session_timeout_hours", 4.0)
         timeout_secs = int(timeout_hours * 3600)
         plugin_id = pipeline.get("plugin_id", "")
         gh_host = _gh_host_for(plugin_id)
+        working_dir = pipeline.get("working_dir") or None
 
         cmd = ["timeout", str(timeout_secs), "gh", "copilot", "--"]
         if model:
@@ -620,6 +622,8 @@ class PipelineEngine:
         cmd.extend(["-p", prompt, "--yolo", "--no-ask-user"])
 
         env = {**os.environ, "GH_HOST": gh_host}
+        if token:
+            env["GH_TOKEN"] = token
 
         start = time.monotonic()
         try:
@@ -628,6 +632,7 @@ class PipelineEngine:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
+                cwd=working_dir,
             )
             stdout, _ = await proc.communicate()
             exit_code = proc.returncode or 0

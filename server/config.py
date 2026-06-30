@@ -99,6 +99,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
     models_json           TEXT DEFAULT '[]',
     allowed_repos_json    TEXT DEFAULT '[]',
     findings_json         TEXT,
+    working_dir           TEXT,
     created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -174,6 +175,15 @@ async def init_db() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(DDL)
+        # Migrations: safe to run repeatedly; ignore if column already exists
+        migrations = [
+            "ALTER TABLE pipelines ADD COLUMN working_dir TEXT",
+        ]
+        for stmt in migrations:
+            try:
+                await db.execute(stmt)
+            except Exception:
+                pass  # column already exists
         await db.commit()
     logger.info("Config DB initialized at %s", db_path)
 
@@ -416,8 +426,8 @@ async def upsert_pipeline(data: dict) -> None:
             """INSERT INTO pipelines(id, name, enabled, plugin_id, board_type,
                    project_owner, project_number, board_path,
                    poll_interval, max_issues, max_retries, session_timeout_hours,
-                   models_json, allowed_repos_json, findings_json, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   models_json, allowed_repos_json, findings_json, working_dir, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, enabled=excluded.enabled,
                    plugin_id=excluded.plugin_id, board_type=excluded.board_type,
@@ -426,7 +436,8 @@ async def upsert_pipeline(data: dict) -> None:
                    max_issues=excluded.max_issues, max_retries=excluded.max_retries,
                    session_timeout_hours=excluded.session_timeout_hours,
                    models_json=excluded.models_json, allowed_repos_json=excluded.allowed_repos_json,
-                   findings_json=excluded.findings_json, updated_at=excluded.updated_at""",
+                   findings_json=excluded.findings_json, working_dir=excluded.working_dir,
+                   updated_at=excluded.updated_at""",
             (
                 pid, data["name"], int(data.get("enabled", True)),
                 data["plugin_id"], data.get("board_type", "github"),
@@ -437,6 +448,7 @@ async def upsert_pipeline(data: dict) -> None:
                 json.dumps(data.get("models", [])),
                 json.dumps(data.get("allowed_repos", [])),
                 json.dumps(data["findings"]) if data.get("findings") else None,
+                data.get("working_dir"),
             ),
         )
         # Replace stages

@@ -98,6 +98,12 @@ else
   AZURE_MOUNT=()
   [[ -d "$AZURE_DIR" ]] && AZURE_MOUNT=(-v "$AZURE_DIR:/root/.azure")
 
+  # Mount the roommate-sensei-o workspace so Copilot sessions can access
+  # hil-stress scripts (skills/, roomboard-tests/, etc.) at /workspace
+  WORKSPACE_MOUNT=()
+  WORKSPACE_HOST="/Users/vn/ws/roommate-sensei-o"
+  [[ -d "$WORKSPACE_HOST" ]] && WORKSPACE_MOUNT=(-v "$WORKSPACE_HOST:/workspace:ro")
+
   CONFIG_MOUNT=()
   SEED_ENVS=()
   if [[ -n "$SEED_CONFIG" ]]; then
@@ -114,6 +120,7 @@ else
     -p "${PORT}:9400" \
     -v "${VOLUME}:/data" \
     "${AZURE_MOUNT[@]+"${AZURE_MOUNT[@]}"}" \
+    "${WORKSPACE_MOUNT[@]+"${WORKSPACE_MOUNT[@]}"}" \
     "${CONFIG_MOUNT[@]+"${CONFIG_MOUNT[@]}"}" \
     "${SEED_ENVS[@]+"${SEED_ENVS[@]}"}" \
     "$IMAGE"

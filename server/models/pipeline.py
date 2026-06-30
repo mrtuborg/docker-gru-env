@@ -46,6 +46,7 @@ class PipelineCreate(BaseModel):
     models: List[ModelConfig] = Field(default_factory=list)
     allowed_repos: List[str] = Field(default_factory=list)
     findings: Optional[FindingsBoard] = None
+    working_dir: Optional[str] = None
 
 
 class PipelineUpdate(BaseModel):
@@ -64,3 +65,4 @@ class PipelineUpdate(BaseModel):
     models: Optional[List[ModelConfig]] = None
     allowed_repos: Optional[List[str]] = None
     findings: Optional[FindingsBoard] = None
+    working_dir: Optional[str] = None
