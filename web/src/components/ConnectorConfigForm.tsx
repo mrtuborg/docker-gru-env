@@ -149,11 +149,19 @@ interface Props {
 export default function ConnectorConfigForm({ connectorType, initialValues = {}, onChange, phase = 'settings' }: Props) {
   const allFields = PLUGIN_FIELDS[connectorType] || []
   const fields = phase === 'wizard' ? allFields.filter(f => f.wizard) : allFields
+
+  // For GitHub: synthesize board_url from host+owner+number if not explicitly stored
+  const enriched = { ...initialValues }
+  if (connectorType === 'github' && !enriched.board_url && enriched.project_owner && enriched.project_number) {
+    const host = enriched.host || 'github.com'
+    enriched.board_url = `https://${host}/orgs/${enriched.project_owner}/projects/${enriched.project_number}`
+  }
+
   const mkDefaults = () => {
     const d: Record<string, any> = {}
     fields.forEach(f => {
-      if (f.type === 'taglist' || f.type === 'model-list') d[f.key] = initialValues[f.key] ?? []
-      else d[f.key] = initialValues[f.key] ?? f.defaultValue ?? (f.type === 'checkbox' ? false : '')
+      if (f.type === 'taglist' || f.type === 'model-list') d[f.key] = enriched[f.key] ?? []
+      else d[f.key] = enriched[f.key] ?? f.defaultValue ?? (f.type === 'checkbox' ? false : '')
     })
     return d
   }
