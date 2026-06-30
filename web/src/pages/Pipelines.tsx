@@ -145,7 +145,7 @@ function PipelineCard({ p, onToggle }: { p: Pipeline; onToggle: () => void }) {
         padding: '14px 20px', borderBottom: '1px solid var(--border)',
       }}>
         <span style={{ fontSize: 18 }}>🔬</span>
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => navigate(`/pipelines/${p.id}`)}>
           <div style={{ fontWeight: 600, fontSize: 14 }}>{p.name}</div>
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>
             {p.plugin_id}
@@ -153,6 +153,7 @@ function PipelineCard({ p, onToggle }: { p: Pipeline; onToggle: () => void }) {
             {p.findings && ` → findings → #${p.findings.project_number}`}
             {ghLink && (
               <a href={ghLink} target="_blank" rel="noreferrer"
+                 onClick={e => e.stopPropagation()}
                  style={{ marginLeft: 6, color: 'var(--accent)' }}>
                 <ExternalLink size={10}/>
               </a>
@@ -164,7 +165,7 @@ function PipelineCard({ p, onToggle }: { p: Pipeline; onToggle: () => void }) {
         </span>
         <div style={{ display: 'flex', gap: 6 }}>
           <button className="btn btn-ghost" style={{ fontSize: 11, padding: '4px 10px' }}
-            onClick={() => navigate(`/pipelines/${p.id}`)}>Edit</button>
+            onClick={() => navigate(`/pipelines/${p.id}`)}>Blueprint</button>
           <button className={`btn ${running ? 'btn-secondary' : 'btn-primary'}`}
             style={{ fontSize: 11, padding: '4px 10px' }} onClick={onToggle}>
             {running ? <><Pause size={11}/> Pause</> : <><Play size={11}/> Start</>}
