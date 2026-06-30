@@ -1,5 +1,3 @@
-import React from 'react'
-
 type Status = 'healthy' | 'degraded' | 'error' | 'unknown'
 
 const STATUS_MAP: Record<Status, { cls: string; dot: string; label: string }> = {
@@ -20,33 +18,35 @@ export default function HealthBadge({ status, message, needsAuth, onAuth }: Heal
   const s = (status as Status) || 'unknown'
   const m = STATUS_MAP[s] || STATUS_MAP.unknown
 
-  const inner = (
-    <>
-      <span className={`dot ${m.dot}`} style={{ width: 6, height: 6, flexShrink: 0 }}/>
-      <span>{needsAuth ? 'Re-authorize' : m.label}</span>
-    </>
-  )
-
-  const sharedStyle: React.CSSProperties = {
-    display: 'inline-flex', alignItems: 'center', gap: 5,
-  }
-
+  // When re-auth is needed: a full-width button showing the error message
   if (needsAuth && onAuth) {
     return (
       <button
-        className={`badge ${m.cls}`}
-        title={message || 'Click to re-authorize'}
         onClick={onAuth}
-        style={{ ...sharedStyle, cursor: 'pointer', border: 'none' }}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          width: '100%', padding: '8px 12px', borderRadius: 8,
+          background: 'color-mix(in srgb, var(--red) 12%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--red) 40%, transparent)',
+          color: 'var(--red)', cursor: 'pointer', textAlign: 'left',
+          fontSize: 12, fontWeight: 500, lineHeight: 1.3,
+        }}
       >
-        {inner}
+        <span className="dot dot-red" style={{ flexShrink: 0 }}/>
+        <span style={{ flex: 1 }}>{message || 'Authentication error — click to re-authorize'}</span>
+        <span style={{ opacity: 0.7, fontSize: 11, whiteSpace: 'nowrap' }}>Re-authorize →</span>
       </button>
     )
   }
 
   return (
-    <span className={`badge ${m.cls}`} title={message || ''} style={sharedStyle}>
-      {inner}
+    <span
+      className={`badge ${m.cls}`}
+      title={message || ''}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}
+    >
+      <span className={`dot ${m.dot}`} style={{ width: 6, height: 6, flexShrink: 0 }}/>
+      <span>{m.label}</span>
     </span>
   )
 }
