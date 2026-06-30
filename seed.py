@@ -22,7 +22,7 @@ except ImportError:
     yaml = None  # type: ignore
 
 
-DEFAULT_CONFIG = "/work/hil-stress/config.yml"
+DEFAULT_CONFIG = "/app/hil-stress-config.yml"
 CONNECTOR_ID   = "ghe-roommate"
 PIPELINE_ID    = "hil-stress"
 
