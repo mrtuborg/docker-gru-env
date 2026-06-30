@@ -5,14 +5,14 @@ interface OAuthModalProps { connectorId: string; onClose: (err?: string) => void
 
 export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalProps) {
   const [flowData, setFlowData] = useState<any>(null)
-  const [status, setStatus] = useState<'loading'|'waiting'|'success'|'error'>('loading')
+  const [status, setStatus] = useState<'loading'|'needs_manifest'|'waiting'|'success'|'error'>('loading')
   const [message, setMessage] = useState('')
   const [copiedCode, setCopiedCode] = useState(false)
   const [countdown, setCountdown] = useState(0)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  useEffect(() => {
-    fetch(`/api/plugins/${connectorId}/auth/device/start`, { method:'POST' })
+  const startDeviceFlow = () => {
+    fetch(`/api/plugins/${connectorId}/auth/device/start`, { method: 'POST' })
       .then(async r => {
         const d = await r.json()
         if (!r.ok) {
@@ -23,15 +23,14 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
         setFlowData(d)
         setStatus('waiting')
         setCountdown(d.expires_in || 900)
-        // Start polling
         pollRef.current = setInterval(async () => {
-          const r = await fetch(`/api/plugins/${connectorId}/auth/device/poll`, { method:'POST' })
-          const result = await r.json()
+          const r2 = await fetch(`/api/plugins/${connectorId}/auth/device/poll`, { method: 'POST' })
+          const result = await r2.json()
           if (result.granted) {
             clearInterval(pollRef.current!)
             setStatus('success')
             setTimeout(() => onClose(), 1500)
-          } else if (!r.ok) {
+          } else if (!r2.ok) {
             clearInterval(pollRef.current!)
             setStatus('error')
             setMessage(result.detail || 'Authorization failed')
@@ -39,6 +38,20 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
         }, (d.interval || 5) * 1000)
       })
       .catch(e => { setStatus('error'); setMessage(String(e)) })
+  }
+
+  useEffect(() => {
+    // First check auth status — if needs_manifest, show registration step instead of device flow
+    fetch(`/api/plugins/${connectorId}/auth/status`)
+      .then(async r => {
+        const d = await r.json()
+        if (d.needs_manifest) {
+          setStatus('needs_manifest')
+        } else {
+          startDeviceFlow()
+        }
+      })
+      .catch(() => startDeviceFlow()) // fallback: try device flow anyway
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
   }, [connectorId])
 
@@ -67,7 +80,23 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
 
         {status === 'loading' && (
           <div style={{ display:'flex', alignItems:'center', gap:12, color:'var(--muted)' }}>
-            <div className="spinner"/> Starting device flow…
+            <div className="spinner"/> Checking auth status…
+          </div>
+        )}
+
+        {status === 'needs_manifest' && (
+          <div style={{ textAlign:'center', padding:'8px 0 16px' }}>
+            <div style={{ fontSize:36, marginBottom:12 }}>🔧</div>
+            <div style={{ fontWeight:600, marginBottom:8 }}>Register a GitHub App first</div>
+            <div style={{ color:'var(--muted)', fontSize:13, marginBottom:20 }}>
+              This GitHub Enterprise instance needs a GitHub App registered before OAuth can work.
+              Click below to auto-register one via the manifest flow.
+            </div>
+            <button className="btn btn-primary" onClick={() => {
+              window.location.href = `/api/plugins/${connectorId}/auth/manifest/register`
+            }}>
+              Register GitHub App →
+            </button>
           </div>
         )}
 
@@ -124,24 +153,9 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
             </div>
             <div style={{ display:'flex', gap:8, justifyContent:'center' }}>
               <button className="btn btn-secondary" onClick={() => onClose(message)}>Close</button>
-              {message?.includes('not enabled') && (
-                <button className="btn btn-primary" onClick={() => {
-                  setStatus('loading'); setMessage('')
-                  fetch(`/api/plugins/${connectorId}/auth/device/start`, { method:'POST' })
-                    .then(async r => {
-                      const d = await r.json()
-                      if (!r.ok) { setStatus('error'); setMessage(d.detail || 'Failed'); return }
-                      setFlowData(d); setStatus('waiting'); setCountdown(d.expires_in || 900)
-                      pollRef.current = setInterval(async () => {
-                        const r2 = await fetch(`/api/plugins/${connectorId}/auth/device/poll`, { method:'POST' })
-                        const res = await r2.json()
-                        if (res.granted) { clearInterval(pollRef.current!); setStatus('success'); setTimeout(() => onClose(), 1500) }
-                        else if (!r2.ok) { clearInterval(pollRef.current!); setStatus('error'); setMessage(res.detail || 'Failed') }
-                      }, (d.interval || 5) * 1000)
-                    })
-                    .catch(e => { setStatus('error'); setMessage(String(e)) })
-                }}>↺ Try Again</button>
-              )}
+              <button className="btn btn-primary" onClick={() => { setStatus('loading'); setMessage(''); startDeviceFlow() }}>
+                ↺ Try Again
+              </button>
             </div>
           </div>
         )}
