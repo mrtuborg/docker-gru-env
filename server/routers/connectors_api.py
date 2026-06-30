@@ -247,7 +247,9 @@ async def manifest_register(plugin_id: str, request: Request):
     if not hasattr(plugin, "get_manifest"):
         raise HTTPException(400, "Plugin does not support manifest registration")
 
-    manifest = plugin.get_manifest()
+    # Derive base URL from the incoming request so the callback port is correct
+    base_url = str(request.base_url).rstrip('/')
+    manifest = plugin.get_manifest(base_url=base_url)
     host = plugin._config.get("host", "github.com")
     state = sec.token_urlsafe(32)
     register_manifest_state(state, plugin_id)

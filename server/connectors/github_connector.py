@@ -130,10 +130,10 @@ class GitHubConnector(GruConnector):
 
     # ── GitHub App Manifest Flow ──────────────────────────────────────────────
 
-    def get_manifest(self) -> dict:
+    def get_manifest(self, base_url: str | None = None) -> dict:
         """Build the GitHub App manifest JSON for auto-registration."""
         host = self._config.get("host", "github.com")
-        base_url = server_url()
+        base_url = base_url or server_url()
         return {
             "name": f"Gru Server ({host})",
             "url": base_url,
