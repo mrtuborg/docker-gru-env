@@ -187,6 +187,13 @@ async def remove(pipeline_id: str):
 
 # ── Control ───────────────────────────────────────────────────────────────────
 
+def _fix_stage_keys(stage: dict) -> dict:
+    """get_pipeline() returns stages with 'column_name'; upsert_pipeline() needs 'column'."""
+    if "column_name" in stage and "column" not in stage:
+        return {**stage, "column": stage["column_name"]}
+    return stage
+
+
 @router.post("/{pipeline_id}/start")
 async def start_pipeline(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
@@ -196,6 +203,7 @@ async def start_pipeline(pipeline_id: str, request: Request):
     started = await engine.start(pipeline_id)
     if not started:
         return {"status": "already_running", "pipeline_id": pipeline_id}
+    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
     await upsert_pipeline({**p, "enabled": True})
     return {"status": "started", "pipeline_id": pipeline_id}
 
@@ -207,6 +215,7 @@ async def stop_pipeline(pipeline_id: str, request: Request):
         raise HTTPException(404, "Pipeline not found")
     engine = request.app.state.engine
     await engine.stop(pipeline_id)
+    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
     await upsert_pipeline({**p, "enabled": False})
     return {"status": "stopped", "pipeline_id": pipeline_id}
 

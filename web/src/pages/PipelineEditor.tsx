@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
@@ -148,18 +148,14 @@ function exportYaml(p: PipelineData): string {
   return lines.join('\n') + '\n'
 }
 
-// ── Tool colour palette — consistent across stage cards and legend ─────────────
-const TOOL_COLORS: Record<string, string> = {}
+// ── Tool colour palette — deterministic hash, no mutable global state ─────────
 const PALETTE = [
   '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444',
   '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1',
 ]
 function toolColor(tool: string): string {
-  if (!TOOL_COLORS[tool]) {
-    const idx = Object.keys(TOOL_COLORS).length % PALETTE.length
-    TOOL_COLORS[tool] = PALETTE[idx]
-  }
-  return TOOL_COLORS[tool]
+  const hash = tool.split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0)
+  return PALETTE[Math.abs(hash) % PALETTE.length]
 }
 
 // ── Pipeline Blueprint view ───────────────────────────────────────────────────
@@ -167,11 +163,12 @@ function toolColor(tool: string): string {
 interface BlueprintProps {
   pipeline: PipelineData
   agents: AgentInfo[]
+  running: boolean
   onEditStage: (idx: number) => void   // switches to edit mode at that stage
   onEdit: () => void                   // switches to full edit mode
 }
 
-function PipelineBlueprint({ pipeline, agents, onEditStage, onEdit }: BlueprintProps) {
+function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: BlueprintProps) {
   const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
   const aiStages = pipeline.stages.filter(s => s.actor === 'ai')
 
@@ -478,7 +475,15 @@ function PipelineBlueprint({ pipeline, agents, onEditStage, onEdit }: BlueprintP
 
           {/* Pipeline stats summary */}
           <div className="card" style={{ padding:12, marginTop:16 }}>
-            <div style={{ fontSize:11, fontWeight:600, color:'var(--muted)', marginBottom:10 }}>Pipeline Stats</div>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+              <span style={{ fontSize:11, fontWeight:600, color:'var(--muted)', flex:1 }}>Pipeline Stats</span>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <div className={`dot ${running ? 'dot-green' : 'dot-muted'}`} style={{ width:7, height:7, borderRadius:'50%' }}/>
+                <span style={{ fontSize:11, fontWeight:600, color: running ? 'var(--green)' : 'var(--muted)' }}>
+                  {running ? 'Running' : 'Paused'}
+                </span>
+              </div>
+            </div>
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
               {[
                 { label:'Stages', value: pipeline.stages.length },
@@ -613,10 +618,12 @@ export default function PipelineEditor() {
   const [pipelines, setPipelines] = useState<PipelineSummary[]>([])
   const [selectedStage, setSelectedStage] = useState<number>(-1)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [connectors, setConnectors] = useState<any[]>([])
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [fetchingColumns, setFetchingColumns] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [viewMode, setViewMode] = useState(!isNew)
@@ -702,6 +709,7 @@ export default function PipelineEditor() {
     const hasContent = pipeline.stages.some(s => s.prompt || s.task_prompt)
     if (hasContent && !window.confirm('Fetching board columns will replace all current stages and their prompts. Continue?')) return
     setFetchingColumns(true)
+    setFetchError(null)
     try {
       const resp = await fetch(
         `/api/pipelines/board-columns/${pipeline.plugin_id}?owner=${pipeline.project_owner}&number=${pipeline.project_number}`
@@ -717,7 +725,7 @@ export default function PipelineEditor() {
       update({ stages })
       if (stages.length > 0) setSelectedStage(0)
     } catch (e: any) {
-      alert('Failed to fetch columns: ' + e.message)
+      setFetchError('Failed to fetch columns: ' + e.message)
     } finally {
       setFetchingColumns(false)
     }
@@ -726,10 +734,17 @@ export default function PipelineEditor() {
   const toggleRunning = async () => {
     if (!pipeline || isNew) return
     setToggling(true)
+    setSaveError(null)
     try {
       const endpoint = running ? 'stop' : 'start'
-      await fetch(`/api/pipelines/${pipeline.id}/${endpoint}`, { method: 'POST' })
+      const resp = await fetch(`/api/pipelines/${pipeline.id}/${endpoint}`, { method: 'POST' })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: `Failed to ${endpoint} pipeline` }))
+        throw new Error(err.detail || `Failed to ${endpoint} pipeline`)
+      }
       setRunning(r => !r)
+    } catch (e: any) {
+      setSaveError(e.message)
     } finally {
       setToggling(false)
     }
@@ -738,6 +753,7 @@ export default function PipelineEditor() {
   const save = async () => {
     if (!pipeline) return
     setSaving(true)
+    setSaveError(null)
     try {
       const method = isNew ? 'POST' : 'PUT'
       const url = isNew ? '/api/pipelines' : `/api/pipelines/${pipeline.id}`
@@ -758,7 +774,7 @@ export default function PipelineEditor() {
         .catch(() => {})
       if (isNew) navigate(`/pipelines/${saved.id}`, { replace: true })
     } catch (e: any) {
-      alert(e.message)
+      setSaveError(e.message)
     } finally {
       setSaving(false)
     }
@@ -771,6 +787,20 @@ export default function PipelineEditor() {
     window.addEventListener('beforeunload', handler)
     return () => window.removeEventListener('beforeunload', handler)
   }, [dirty])
+
+  // Ctrl+S / Cmd+S to save (only in Edit mode)
+  const saveRef = useRef(save)
+  useEffect(() => { saveRef.current = save })
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's' && !viewMode) {
+        e.preventDefault()
+        saveRef.current()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [viewMode])
 
   const navigateSafe = (path: string) => {
     if (dirty && !window.confirm('You have unsaved changes. Leave without saving?')) return
@@ -829,7 +859,7 @@ export default function PipelineEditor() {
         display:'flex', alignItems:'center', gap:12,
         padding:'0 0 16px', borderBottom:'1px solid var(--border)', marginBottom:16,
       }}>
-        <button className="btn btn-ghost" onClick={() => navigateSafe('/pipelines')} style={{ padding:'6px 8px' }}>
+        <button className="btn btn-ghost" onClick={() => navigateSafe('/')} style={{ padding:'6px 8px' }}>
           <ArrowLeft size={16}/>
         </button>
 
@@ -903,19 +933,36 @@ export default function PipelineEditor() {
         )}
       </div>
 
+      {/* Error banner (save / toggle errors) */}
+      {saveError && (
+        <div style={{
+          display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
+          background:'color-mix(in srgb, var(--red) 10%, transparent)',
+          border:'1px solid color-mix(in srgb, var(--red) 25%, transparent)',
+          borderRadius:6, marginBottom:12, fontSize:12, color:'var(--red)',
+        }}>
+          <span style={{ flex:1 }}>{saveError}</span>
+          <button className="btn btn-ghost" onClick={() => setSaveError(null)} style={{ padding:2, color:'var(--red)' }}>
+            <X size={12}/>
+          </button>
+        </div>
+      )}
+
       {/* ── Blueprint / Editor content ── */}
       {viewMode ? (
         <div style={{ flex:1, overflow:'auto' }}>
           <PipelineBlueprint
             pipeline={pipeline}
             agents={agents}
+            running={running}
             onEditStage={idx => { setViewMode(false); setSelectedStage(idx) }}
             onEdit={() => setViewMode(false)}
           />
         </div>
       ) : (
       <div style={{ display:'flex', flex:1, gap:16, overflow:'hidden' }}>
-        {/* Left: pipeline config + stages */}        <div style={{ width:320, flexShrink:0, overflow:'auto', paddingRight:8 }}>
+        {/* Left: pipeline config + stages */}
+        <div style={{ width:320, flexShrink:0, overflow:'auto', paddingRight:8 }}>
           {/* Basic info */}
           <div style={{ marginBottom:20 }}>
             <label className="form-label">Pipeline ID</label>
@@ -952,11 +999,17 @@ export default function PipelineEditor() {
                 onChange={e => update({ project_number: parseInt(e.target.value) || 0 })}/>
             </div>
           </div>
-          <button className="btn btn-secondary" style={{ width:'100%', marginBottom:20, fontSize:12 }}
+          <button className="btn btn-secondary" style={{ width:'100%', marginBottom:4, fontSize:12 }}
             onClick={fetchColumns} disabled={fetchingColumns || !pipeline.plugin_id || !pipeline.project_owner || !pipeline.project_number}>
             {fetchingColumns ? <><div className="spinner" style={{ width:12, height:12 }}/> Fetching…</> :
               <><RefreshCw size={12}/> Fetch Board Columns</>}
           </button>
+          {fetchError && (
+            <div style={{ fontSize:11, color:'var(--red)', marginBottom:12, padding:'4px 6px',
+              background:'color-mix(in srgb, var(--red) 8%, transparent)', borderRadius:4 }}>
+              {fetchError}
+            </div>
+          )}
 
           {/* Stages */}
           <div className="section-label">Stages</div>
