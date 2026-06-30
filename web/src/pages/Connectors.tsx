@@ -191,6 +191,20 @@ export default function Connectors() {
                 <div style={{ flex:1, minWidth:0 }}>
                   <div style={{ fontWeight:600, marginBottom:2, fontSize:14 }}>{p.display_name}</div>
                   <div style={{ fontSize:11, color:'var(--muted)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.id}</div>
+                  {/* Show key config fields as a subtitle */}
+                  {p.plugin_type === 'github' && (p.config?.host || p.config?.project_owner) && (
+                    <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+                      {p.config.host && <span>{p.config.host}</span>}
+                      {p.config.project_owner && <span> · {p.config.project_owner}</span>}
+                      {p.config.project_number && <span> · project #{p.config.project_number}</span>}
+                    </div>
+                  )}
+                  {p.plugin_type === 'azure' && p.config?.storage_account && (
+                    <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{p.config.storage_account}</div>
+                  )}
+                  {p.plugin_type === 'copilot' && p.config?.github_connector_id && (
+                    <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>via {p.config.github_connector_id}</div>
+                  )}
                 </div>
               </div>
 
