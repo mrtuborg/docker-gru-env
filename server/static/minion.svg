@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 290">
+  <defs>
+    <!-- Body ellipse clip -->
+    <clipPath id="B"><ellipse cx="100" cy="148" rx="65" ry="120"/></clipPath>
+  </defs>
+
+  <!-- === BACKGROUND: yellow body === -->
+  <ellipse cx="100" cy="148" rx="65" ry="120" fill="#F6C31C"/>
+
+  <!-- === OVERALLS: blue fill clipped to body === -->
+  <!-- Overalls start at y=172 (waistline) -->
+  <rect x="25" y="172" width="150" height="100" fill="#5B9BD5" clip-path="url(#B)"/>
+
+  <!-- === GOGGLE BAND: black across face, clipped to body === -->
+  <rect x="25" y="94" width="150" height="42" fill="#1A1A1A" clip-path="url(#B)"/>
+
+  <!-- === BODY OUTLINE (drawn twice — once below gear, once above) === -->
+  <ellipse cx="100" cy="148" rx="65" ry="120" fill="none" stroke="#1A1A1A" stroke-width="4"/>
+
+  <!-- === OVERALLS TOP EDGE (waistline arc) === -->
+  <!-- Follow the ellipse at y=172: x goes from 36 to 164 -->
+  <path d="M36 172 Q100 158 164 172" stroke="#1A1A1A" stroke-width="3" fill="none"/>
+
+  <!-- === SUSPENDER STRAPS === -->
+  <!-- Left strap: connects shoulder area to waistline -->
+  <path d="M70 148 Q70 162 70 172" stroke="#5B9BD5" stroke-width="14" stroke-linecap="round" fill="none"/>
+  <path d="M70 148 Q70 162 70 172" stroke="#1A1A1A" stroke-width="14" stroke-linecap="round" fill="none" opacity="0" />
+  <!-- Draw as filled shapes -->
+  <rect x="63" y="148" width="14" height="28" rx="7" fill="#5B9BD5"/>
+  <rect x="63" y="148" width="14" height="28" rx="7" fill="none" stroke="#1A1A1A" stroke-width="2"/>
+  <!-- Right strap -->
+  <rect x="123" y="148" width="14" height="28" rx="7" fill="#5B9BD5"/>
+  <rect x="123" y="148" width="14" height="28" rx="7" fill="none" stroke="#1A1A1A" stroke-width="2"/>
+
+  <!-- Strap buttons at waist -->
+  <circle cx="70"  cy="173" r="5" fill="#F6C31C" stroke="#1A1A1A" stroke-width="1.5"/>
+  <circle cx="130" cy="173" r="5" fill="#F6C31C" stroke="#1A1A1A" stroke-width="1.5"/>
+
+  <!-- === POCKET (centered on overalls) === -->
+  <rect x="76" y="193" width="48" height="36" rx="6" fill="#4A87C5"/>
+  <rect x="76" y="193" width="48" height="36" rx="6" fill="none" stroke="#1A1A1A" stroke-width="2"/>
+
+  <!-- === GOGGLE (single large eye) === -->
+  <!-- Outer silver ring -->
+  <circle cx="100" cy="115" r="30" fill="#CECECE"/>
+  <!-- Inner white -->
+  <circle cx="100" cy="115" r="24" fill="white"/>
+  <!-- Iris (brown) -->
+  <circle cx="100" cy="115" r="14" fill="#7B4F2E"/>
+  <!-- Pupil -->
+  <circle cx="100" cy="115" r="7.5" fill="#111"/>
+  <!-- Shine top-left -->
+  <circle cx="91"  cy="107" r="5"   fill="white" opacity="0.85"/>
+  <!-- Tiny shine bottom-right -->
+  <circle cx="107" cy="121" r="2.5" fill="white" opacity="0.4"/>
+  <!-- Goggle rim outline -->
+  <circle cx="100" cy="115" r="30"  fill="none" stroke="#1A1A1A" stroke-width="2.5"/>
+
+  <!-- === SMILE (between goggle and overalls) === -->
+  <path d="M78 150 Q100 168 122 150" stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+
+  <!-- === WILD HAIR (spiky tufts curving upward) === -->
+  <path d="M78 34  C72 18  68  8  72  0"  stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M88 29  C86 13  86  2  90 -4"  stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M100 28 C100 12 100 0 100 -6"  stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M112 29 C114 13 114  2 110 -4" stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M122 34 C128 18 132  8 128  0" stroke="#1A1A1A" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+  <path d="M132 42 C142 28 148 18 144 10" stroke="#1A1A1A" stroke-width="3"   fill="none" stroke-linecap="round"/>
+  <path d="M68  42 C58  28  52  18 56  10" stroke="#1A1A1A" stroke-width="3"   fill="none" stroke-linecap="round"/>
+
+  <!-- === ARMS === -->
+  <!-- Left arm: banana-shaped path extending left from body at y~185 -->
+  <path d="M38 180 C18 176 8 186 10 200 C12 214 26 218 38 208"
+        fill="#F6C31C" stroke="#1A1A1A" stroke-width="3.5"/>
+  <!-- Left fist (black round) -->
+  <circle cx="11" cy="204" r="13" fill="#1A1A1A"/>
+
+  <!-- Right arm -->
+  <path d="M162 180 C182 176 192 186 190 200 C188 214 174 218 162 208"
+        fill="#F6C31C" stroke="#1A1A1A" stroke-width="3.5"/>
+  <!-- Right fist -->
+  <circle cx="189" cy="204" r="13" fill="#1A1A1A"/>
+
+  <!-- === SHOES (black ovals at bottom of body) === -->
+  <ellipse cx="78"  cy="267" rx="28" ry="12" fill="#1A1A1A"/>
+  <ellipse cx="122" cy="267" rx="28" ry="12" fill="#1A1A1A"/>
+</svg>

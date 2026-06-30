@@ -243,7 +243,21 @@ async def get_status(pipeline_id: str, request: Request):
     if not p:
         raise HTTPException(404, "Pipeline not found")
     engine = request.app.state.engine
-    return {"pipeline_id": pipeline_id, "status": engine.status(pipeline_id)}
+    live = engine.live_state(pipeline_id)
+    recent = await list_pipeline_runs(pipeline_id, limit=20)
+    # Flatten recent run items for the last few runs
+    recent_items: list[dict] = []
+    for run in recent[:5]:
+        items = await get_pipeline_run_items(run["id"])
+        for item in items:
+            recent_items.append({**item, "run_id": run["id"]})
+    return {
+        "pipeline_id": pipeline_id,
+        "status": engine.status(pipeline_id),
+        "active": live["active"],
+        "queued": live["queued"],
+        "recent": recent_items[:20],
+    }
 
 
 @router.get("/{pipeline_id}/logs")

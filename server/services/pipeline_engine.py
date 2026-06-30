@@ -41,6 +41,20 @@ from ..vault import load_secret
 logger = logging.getLogger(__name__)
 
 
+def _gh_host_for(plugin_id: str) -> str:
+    """Read the GitHub host from the loaded connector config, fall back to env/default."""
+    try:
+        # Import lazily to avoid circular imports at module load time
+        from ..app import connector_manager
+        if connector_manager:
+            connector = connector_manager.get(plugin_id)
+            if connector and hasattr(connector, "_config"):
+                return connector._config.get("host", "github.com")
+    except Exception:
+        pass
+    return os.environ.get("GH_HOST", "github.com")
+
+
 # ── Data types ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -114,10 +128,19 @@ class PipelineEngine:
     def __init__(self):
         self._tasks: dict[str, asyncio.Task] = {}
         self._stop_flags: dict[str, asyncio.Event] = {}
+        # Live state exposed to the status API
+        self._active: dict[str, dict | None] = {}   # pipeline_id → active issue dict
+        self._queue: dict[str, list[dict]] = {}     # pipeline_id → queued issue list
 
     def is_running(self, pipeline_id: str) -> bool:
         task = self._tasks.get(pipeline_id)
         return task is not None and not task.done()
+
+    def live_state(self, pipeline_id: str) -> dict:
+        return {
+            "active": self._active.get(pipeline_id),
+            "queued": self._queue.get(pipeline_id, []),
+        }
 
     async def start(self, pipeline_id: str) -> bool:
         if self.is_running(pipeline_id):
@@ -216,6 +239,7 @@ class PipelineEngine:
 
         issues = await self._query_board(pipeline, token)
         if not issues:
+            self._queue[pid] = []
             await finish_pipeline_run(run_id, "completed", {"processed": 0})
             return {"issues_processed": 0}
 
@@ -239,6 +263,19 @@ class PipelineEngine:
         consec_failures = 0
 
         counts = {"processed": 0, "succeeded": 0, "failed": 0, "skipped": 0}
+
+        # Publish initial queue (actionable issues not yet active)
+        def _as_dict(iss: BoardIssue) -> dict:
+            return {"number": iss.number, "repo": iss.repo, "stage": iss.stage, "title": iss.title}
+
+        actionable = [
+            iss for iss in issues
+            if iss.stage in stage_priority
+            and state.get(f"{iss.repo}:{iss.number}:{iss.stage}", {}).get("status") != "completed"
+            and state.get(f"{iss.repo}:{iss.number}:{iss.stage}", {}).get("attempt_count", 0) < max_retries
+        ]
+        self._queue[pid] = [_as_dict(i) for i in actionable]
+        self._active[pid] = None
 
         for issue in issues:
             if counts["processed"] >= max_issues:
@@ -275,6 +312,10 @@ class PipelineEngine:
 
             counts["processed"] += 1
             current_model = model_list[current_model_idx] if model_list else ""
+
+            # Mark as active, remove from queue
+            self._active[pid] = {**_as_dict(issue), "started_at": datetime.now(timezone.utc).isoformat(), "model": current_model}
+            self._queue[pid] = [q for q in self._queue.get(pid, []) if not (q["number"] == issue.number and q["repo"] == issue.repo)]
 
             agent_label = f" via agent '{agent_id}'" if agent_data else ""
             self._emit(pid, "info",
@@ -313,6 +354,7 @@ class PipelineEngine:
 
             # Update state
             attempt_count = st.get("attempt_count", 0) + 1
+            self._active[pid] = None  # clear active after session ends
             if result.exit_code == 0 and result.stage_changed:
                 await set_pipeline_state(pid, issue_key, "completed", attempt_count)
                 counts["succeeded"] += 1
@@ -371,12 +413,8 @@ class PipelineEngine:
         if not owner or not number:
             return []
 
-        # Detect org vs user
-        host = "github.com"  # TODO: read from plugin config
         plugin_id = pipeline["plugin_id"]
-
-        # Get host from plugin config (via app state — not available here, use env)
-        gh_host = os.environ.get("GH_HOST", "github.com")
+        gh_host = _gh_host_for(plugin_id)
 
         entity = await _detect_entity_type(gh_host, owner, token)
 
@@ -494,7 +532,7 @@ class PipelineEngine:
             "REPO": pipeline.get("project_owner", "") + "/" + str(pipeline.get("project_number", "")),
             "ISSUE_REPO": issue.repo,
             "ISSUE_STAGE": issue.stage,
-            "GH_HOST": os.environ.get("GH_HOST", "github.com"),
+            "GH_HOST": _gh_host_for(pipeline.get("plugin_id", "")),
             "PROJECT_NUM": str(pipeline.get("project_number", "")),
             "PROJECT_OWNER": pipeline.get("project_owner", ""),
             "PROJECT_ID": "",  # Filled by board query if needed
@@ -530,7 +568,7 @@ class PipelineEngine:
             "REPO": pipeline.get("project_owner", "") + "/" + str(pipeline.get("project_number", "")),
             "ISSUE_REPO": issue.repo,
             "ISSUE_STAGE": issue.stage,
-            "GH_HOST": os.environ.get("GH_HOST", "github.com"),
+            "GH_HOST": _gh_host_for(pipeline.get("plugin_id", "")),
             "PROJECT_NUM": str(pipeline.get("project_number", "")),
             "PROJECT_OWNER": pipeline.get("project_owner", ""),
         }
@@ -571,7 +609,8 @@ class PipelineEngine:
         """Execute a Copilot session as a subprocess."""
         timeout_hours = pipeline.get("session_timeout_hours", 4.0)
         timeout_secs = int(timeout_hours * 3600)
-        gh_host = os.environ.get("GH_HOST", "github.com")
+        plugin_id = pipeline.get("plugin_id", "")
+        gh_host = _gh_host_for(plugin_id)
 
         cmd = ["timeout", str(timeout_secs), "gh", "copilot", "--"]
         if model:
@@ -614,7 +653,7 @@ class PipelineEngine:
         self, pipeline: dict, issue: BoardIssue, token: str, result: SessionResult,
     ) -> SessionResult:
         """After a successful session, verify the issue actually moved to a new stage."""
-        gh_host = os.environ.get("GH_HOST", "github.com")
+        gh_host = _gh_host_for(pipeline.get("plugin_id", ""))
         gql_url = (
             f"https://{gh_host}/api/graphql"
             if gh_host != "github.com"
