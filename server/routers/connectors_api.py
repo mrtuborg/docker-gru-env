@@ -56,7 +56,7 @@ async def list_plugins(request: Request):
     result = []
     for plugin in pm.get_all():
         health = pm.get_health(plugin.plugin_id)
-        result.append({**plugin.to_dict(), "health": {"status": health.status, "message": health.message}})
+        result.append({**plugin.to_dict(), "health": {"status": health.status, "message": health.message, "details": health.details}})
     return result
 
 
@@ -82,7 +82,7 @@ async def get_plugin(plugin_id: str, request: Request):
         raise HTTPException(404, f"Plugin '{plugin_id}' not found")
     health = pm.get_health(plugin_id)
     schema = plugin.config_schema()
-    return {**plugin.to_dict(), "health": {"status": health.status, "message": health.message}, "schema": schema}
+    return {**plugin.to_dict(), "health": {"status": health.status, "message": health.message, "details": health.details}, "schema": schema}
 
 
 @router.put("/{plugin_id}")

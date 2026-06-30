@@ -197,7 +197,7 @@ export default function Connectors() {
               <HealthBadge
                 status={p.health?.status}
                 message={p.health?.message}
-                needsAuth={!!p.health?.extra?.needs_auth}
+                needsAuth={!!p.health?.details?.needs_auth}
                 onAuth={() => setOauthConnector(p.id)}
               />
 

@@ -103,7 +103,7 @@ class GitHubConnector(GruConnector):
                 login = resp.json().get("login", "?")
                 return ConnectorHealth(HealthStatus.HEALTHY, f"Authenticated as @{login}")
             elif resp.status_code == 401:
-                return ConnectorHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser")
+                return ConnectorHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser", {"needs_auth": True})
             else:
                 return ConnectorHealth(HealthStatus.DEGRADED, f"Unexpected status {resp.status_code}")
         except httpx.ConnectError:
