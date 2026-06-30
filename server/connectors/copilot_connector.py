@@ -86,7 +86,7 @@ class CopilotConnector(GruConnector):
                 {"needs_auth": True},
             )
 
-        # 3. Check gh copilot extension
+        # 3. Check gh copilot is available (built-in since gh 2.x)
         try:
             proc = await asyncio.create_subprocess_exec(
                 "gh", "copilot", "--version",
@@ -94,14 +94,13 @@ class CopilotConnector(GruConnector):
                 stderr=asyncio.subprocess.PIPE,
                 env={**__import__("os").environ, "GH_TOKEN": token},
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=15)
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
             if proc.returncode == 0:
                 version = stdout.decode().strip().split("\n")[0]
                 return ConnectorHealth(HealthStatus.HEALTHY, f"Copilot CLI ready ({version})")
-            return ConnectorHealth(
-                HealthStatus.DEGRADED,
-                "gh copilot extension not installed — run: gh extension install github/gh-copilot",
-            )
+            # gh copilot is built-in in gh ≥ 2.x; if it fails, report the actual error
+            err = (stdout.decode() + stderr.decode()).strip()
+            return ConnectorHealth(HealthStatus.DEGRADED, err or "gh copilot unavailable")
         except asyncio.TimeoutError:
             return ConnectorHealth(HealthStatus.DEGRADED, "gh copilot --version timed out")
 
