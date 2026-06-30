@@ -39,7 +39,9 @@ while [[ $i -lt ${#args[@]} ]]; do
         SEED_CONFIG="${args[$next]}"
         i=$((i+1))
       else
-        SEED_CONFIG="-"   # use baked-in default
+        echo "Error: --seed requires a config file path" >&2
+        echo "Usage: ./server-run.sh --seed <config.yml>" >&2
+        exit 1
       fi
       ;;
   esac
@@ -89,11 +91,9 @@ else
     if [[ -n "${GRU_GHE_TOKEN:-}" ]]; then
       SEED_ENVS+=(-e "GRU_GHE_TOKEN=${GRU_GHE_TOKEN}")
     fi
-    if [[ "$SEED_CONFIG" != "-" ]]; then
-      HOST_CFG="$(cd "$(dirname "$SEED_CONFIG")" && pwd)/$(basename "$SEED_CONFIG")"
-      CONFIG_MOUNT=(-v "$HOST_CFG:/app/seed-config.yml:ro")
-      SEED_ENVS+=(-e "GRU_SEED_CONFIG=/app/seed-config.yml")
-    fi
+    HOST_CFG="$(cd "$(dirname "$SEED_CONFIG")" && pwd)/$(basename "$SEED_CONFIG")"
+    CONFIG_MOUNT=(-v "$HOST_CFG:/app/seed-config.yml:ro")
+    SEED_ENVS+=(-e "GRU_SEED_CONFIG=/app/seed-config.yml")
   fi
 
   docker run -d \

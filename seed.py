@@ -22,7 +22,7 @@ except ImportError:
     yaml = None  # type: ignore
 
 
-DEFAULT_CONFIG = "/app/hil-stress-config.yml"
+DEFAULT_CONFIG = ""  # must be provided via --config or GRU_SEED_CONFIG
 CONNECTOR_ID   = "ghe-roommate"
 PIPELINE_ID    = "hil-stress"
 
@@ -116,6 +116,8 @@ async def main():
     args = parser.parse_args()
 
     mode = "DRY RUN" if args.dry_run else "SEEDING"
+    if not args.config:
+        parser.error("--config <file> is required (or set GRU_SEED_CONFIG)")
     print(f"▶ {mode} from {args.config}")
 
     cfg = _load_config(args.config)

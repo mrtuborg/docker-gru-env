@@ -40,7 +40,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source
 COPY server/ ./server/
 COPY seed.py ./seed.py
-COPY hil-stress-config.yml ./hil-stress-config.yml
 
 # Copy built SPA from web-build stage
 COPY --from=web-build /app/server/static ./server/static
