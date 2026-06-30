@@ -142,8 +142,12 @@ export default function Connectors() {
 
   const load = () => {
     setLoading(true)
-    fetch('/api/plugins').then(r => r.json()).then(d => { setConnectors(d); setLoading(false) })
-      .catch(() => setLoading(false))
+    fetch('/api/plugins').then(r => r.json()).then(d => {
+      setConnectors(d)
+      setLoading(false)
+      // Auto-check health for every connector on first load
+      d.forEach((p: any) => refreshHealth(p.id))
+    }).catch(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
