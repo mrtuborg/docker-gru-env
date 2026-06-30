@@ -102,7 +102,7 @@ async def _insert_pipeline(cfg: dict, dry_run: bool):
     }
 
     print(f"  pipeline: {PIPELINE_ID} ({row['name']}) — {len(stages)} stages: "
-          + " → ".join(s["column_name"] for s in stages))
+          + " → ".join(s["column"] for s in stages))
     if dry_run:
         return
     await upsert_pipeline(row)
