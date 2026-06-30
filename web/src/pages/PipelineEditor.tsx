@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
   Upload, Download, RefreshCw, ArrowUp, ArrowDown, X,
-  FileUp, Clipboard,
+  FileUp, Clipboard, Eye, Pencil, Layers, Wrench, ArrowRight,
 } from 'lucide-react'
 
 interface Stage {
@@ -148,6 +148,359 @@ function exportYaml(p: PipelineData): string {
   return lines.join('\n') + '\n'
 }
 
+// ── Tool colour palette — consistent across stage cards and legend ─────────────
+const TOOL_COLORS: Record<string, string> = {}
+const PALETTE = [
+  '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444',
+  '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1',
+]
+function toolColor(tool: string): string {
+  if (!TOOL_COLORS[tool]) {
+    const idx = Object.keys(TOOL_COLORS).length % PALETTE.length
+    TOOL_COLORS[tool] = PALETTE[idx]
+  }
+  return TOOL_COLORS[tool]
+}
+
+// ── Pipeline Blueprint view ───────────────────────────────────────────────────
+
+interface BlueprintProps {
+  pipeline: PipelineData
+  agents: AgentInfo[]
+  onEditStage: (idx: number) => void   // switches to edit mode at that stage
+  onEdit: () => void                   // switches to full edit mode
+}
+
+function PipelineBlueprint({ pipeline, agents, onEditStage, onEdit }: BlueprintProps) {
+  const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
+  const aiStages = pipeline.stages.filter(s => s.actor === 'ai')
+
+  // Collect all unique tools across all stages
+  const allTools = Array.from(new Set(
+    pipeline.stages.flatMap(s => {
+      const ag = s.agent_id ? agentMap[s.agent_id] : null
+      return ag ? ag.tools : []
+    })
+  ))
+
+  // tool → list of stage indices that have it
+  const toolStageMap: Record<string, number[]> = {}
+  pipeline.stages.forEach((s, i) => {
+    const ag = s.agent_id ? agentMap[s.agent_id] : null
+    if (!ag) return
+    ag.tools.forEach(t => {
+      if (!toolStageMap[t]) toolStageMap[t] = []
+      toolStageMap[t].push(i)
+    })
+  })
+
+  // Unique agents used (by id)
+  const agentRoster: Record<string, { agent: AgentInfo | null; stageIdxs: number[] }> = {}
+  pipeline.stages.forEach((s, i) => {
+    const key = s.agent_id || '__human__'
+    if (!agentRoster[key]) agentRoster[key] = { agent: s.agent_id ? agentMap[s.agent_id] : null, stageIdxs: [] }
+    agentRoster[key].stageIdxs.push(i)
+  })
+
+  const sharedTools = allTools
+    .filter(t => toolStageMap[t]?.length > 1)
+    .sort((a, b) => (toolStageMap[b]?.length || 0) - (toolStageMap[a]?.length || 0))
+
+  const promptedCount = pipeline.stages.filter(s => s.prompt || s.task_prompt).length
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+      {/* ── Stage Flow ── */}
+      <div>
+        <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase' }}>
+          Stage Flow
+        </div>
+        <div style={{ overflowX:'auto', paddingBottom:8 }}>
+          <div style={{ display:'flex', alignItems:'stretch', gap:0, minWidth:'max-content' }}>
+            {pipeline.stages.map((stage, i) => {
+              const ag = stage.agent_id ? agentMap[stage.agent_id] : null
+              const isHuman = stage.actor === 'human'
+              const hasPrompt = !!(stage.prompt || stage.task_prompt)
+              const tools = ag ? ag.tools : []
+
+              return (
+                <div key={i} style={{ display:'flex', alignItems:'center' }}>
+                  {/* Stage card */}
+                  <div
+                    onClick={() => onEditStage(i)}
+                    title="Click to edit this stage"
+                    style={{
+                      width: 148, borderRadius:8, border:'1px solid var(--border)',
+                      background: isHuman
+                        ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
+                        : 'var(--surface)',
+                      cursor:'pointer', overflow:'hidden',
+                      transition:'border-color 0.15s, box-shadow 0.15s',
+                    }}
+                    onMouseEnter={e => {
+                      ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)'
+                      ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent)'
+                    }}
+                    onMouseLeave={e => {
+                      ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
+                      ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
+                    }}
+                  >
+                    {/* Header: column name + actor icon */}
+                    <div style={{
+                      padding:'8px 10px', display:'flex', alignItems:'center', gap:6,
+                      borderBottom:'1px solid var(--border)',
+                      background: isHuman
+                        ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
+                        : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                    }}>
+                      <div style={{
+                        width:22, height:22, borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center',
+                        background: isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                        color: isHuman ? 'var(--muted)' : 'var(--accent)',
+                        flexShrink:0,
+                      }}>
+                        {isHuman ? <User size={12}/> : <Bot size={12}/>}
+                      </div>
+                      <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        {stage.column || '(unnamed)'}
+                      </span>
+                      <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
+                    </div>
+
+                    {/* Body: agent + model */}
+                    <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', minHeight:54 }}>
+                      {isHuman ? (
+                        <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:6 }}>
+                          Human gate
+                        </div>
+                      ) : ag ? (
+                        <>
+                          <div style={{ fontSize:12, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                            {ag.name || ag.id}
+                          </div>
+                          {ag.model && (
+                            <span style={{
+                              fontSize:9, padding:'1px 5px', borderRadius:3,
+                              background:'color-mix(in srgb, var(--purple) 15%, transparent)',
+                              color:'var(--purple)', fontWeight:600,
+                            }}>{ag.model.split('-').slice(0,2).join('-')}</span>
+                          )}
+                        </>
+                      ) : (
+                        <div style={{ color:'var(--muted)', fontSize:11 }}>
+                          {hasPrompt ? 'Inline prompt' : <span style={{ color:'var(--red)', fontSize:11 }}>No agent / prompt</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Footer: tool chips */}
+                    <div style={{ padding:'6px 10px', minHeight:36, display:'flex', flexWrap:'wrap', gap:3 }}>
+                      {tools.length > 0 ? tools.map(t => (
+                        <span key={t} style={{
+                          fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
+                          background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
+                          color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
+                        }}>{t}</span>
+                      )) : hasPrompt ? (
+                        <span style={{ fontSize:9, color:'var(--muted)' }}>inline prompt ✓</span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {/* Arrow connector */}
+                  {i < pipeline.stages.length - 1 && (
+                    <div style={{ display:'flex', alignItems:'center', color:'var(--muted)', padding:'0 4px', flexShrink:0 }}>
+                      <ArrowRight size={14}/>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+
+            {pipeline.stages.length === 0 && (
+              <div style={{
+                padding:'32px 24px', color:'var(--muted)', fontSize:13, textAlign:'center',
+                border:'1px dashed var(--border)', borderRadius:8, minWidth:300,
+              }}>
+                No stages. <button className="btn btn-ghost" style={{ fontSize:12 }} onClick={onEdit}>Switch to Edit</button> to add.
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Bottom: Agent Roster + Shared Tools ── */}
+      <div style={{ display:'flex', gap:20 }}>
+
+        {/* Agent Roster */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>
+            <Layers size={11}/> Agent Roster
+          </div>
+          <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+            {Object.entries(agentRoster)
+              .sort(([,a],[,b]) => b.stageIdxs.length - a.stageIdxs.length)
+              .map(([key, { agent, stageIdxs }]) => (
+              <div key={key} className="card" style={{ padding:'12px 14px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+                  <div style={{
+                    width:28, height:28, borderRadius:6, display:'flex', alignItems:'center', justifyContent:'center',
+                    background: key === '__human__'
+                      ? 'var(--surface2)'
+                      : 'color-mix(in srgb, var(--accent) 15%, transparent)',
+                    color: key === '__human__' ? 'var(--muted)' : 'var(--accent)',
+                    flexShrink:0,
+                  }}>
+                    {key === '__human__' ? <User size={14}/> : <Bot size={14}/>}
+                  </div>
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <div style={{ fontSize:13, fontWeight:600, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {agent ? (agent.name || agent.id) : 'Human Gate'}
+                    </div>
+                    {agent?.model && (
+                      <div style={{ fontSize:10, color:'var(--purple)', marginTop:1 }}>{agent.model}</div>
+                    )}
+                  </div>
+                  <span style={{
+                    fontSize:11, fontWeight:700, padding:'2px 8px', borderRadius:12,
+                    background:'var(--surface2)', color:'var(--muted)',
+                  }}>×{stageIdxs.length}</span>
+                </div>
+
+                {/* Stage chips */}
+                <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginBottom: agent?.tools.length ? 8 : 0 }}>
+                  {stageIdxs.map(idx => (
+                    <button key={idx} className="btn btn-ghost"
+                      onClick={() => onEditStage(idx)}
+                      style={{ fontSize:10, padding:'2px 7px', borderRadius:4, border:'1px solid var(--border)' }}>
+                      {pipeline.stages[idx]?.column || `#${idx+1}`}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Tools */}
+                {agent && agent.tools.length > 0 && (
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                    {agent.tools.map(t => (
+                      <span key={t} style={{
+                        fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
+                        background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
+                        color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
+                      }}>{t}</span>
+                    ))}
+                  </div>
+                )}
+
+                {agent && !agent.tools.length && !agent.description && (
+                  <div style={{ fontSize:11, color:'var(--muted)' }}>No tools configured</div>
+                )}
+
+                {agent?.description && (
+                  <div style={{ fontSize:11, color:'var(--muted)', marginTop:4, fontStyle:'italic' }}>
+                    {agent.description.slice(0, 80)}{agent.description.length > 80 ? '…' : ''}
+                  </div>
+                )}
+              </div>
+            ))}
+            {Object.keys(agentRoster).length === 0 && (
+              <div style={{ color:'var(--muted)', fontSize:12, padding:'12px 0' }}>
+                No agents assigned. Open Edit mode to assign agents to stages.
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Shared Tools */}
+        <div style={{ width:280, flexShrink:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>
+            <Wrench size={11}/> Shared Tools
+          </div>
+
+          {sharedTools.length > 0 ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {sharedTools.map(tool => {
+                const stageIdxs = toolStageMap[tool] || []
+                const pct = Math.round((stageIdxs.length / Math.max(aiStages.length, 1)) * 100)
+                return (
+                  <div key={tool}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                      <span style={{
+                        fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4,
+                        background:`color-mix(in srgb, ${toolColor(tool)} 18%, transparent)`,
+                        color: toolColor(tool), border:`1px solid color-mix(in srgb, ${toolColor(tool)} 30%, transparent)`,
+                        flexShrink:0,
+                      }}>{tool}</span>
+                      <span style={{ fontSize:11, color:'var(--muted)', marginLeft:'auto', flexShrink:0 }}>
+                        {stageIdxs.length}/{aiStages.length} stages
+                      </span>
+                    </div>
+                    {/* Bar */}
+                    <div style={{ height:6, borderRadius:3, background:'var(--surface2)', overflow:'hidden' }}>
+                      <div style={{
+                        height:'100%', width:`${pct}%`, borderRadius:3,
+                        background: toolColor(tool), transition:'width 0.4s',
+                      }}/>
+                    </div>
+                    {/* Which stages */}
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:3, marginTop:4 }}>
+                      {stageIdxs.map(idx => (
+                        <button key={idx} className="btn btn-ghost"
+                          onClick={() => onEditStage(idx)}
+                          style={{ fontSize:9, padding:'1px 5px', borderRadius:3, border:'1px solid var(--border)', color:'var(--muted)' }}>
+                          {pipeline.stages[idx]?.column || `#${idx+1}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : allTools.length > 0 ? (
+            <div className="card" style={{ padding:14, textAlign:'center' }}>
+              <Wrench size={20} style={{ color:'var(--muted)', marginBottom:8 }}/>
+              <div style={{ fontSize:12, color:'var(--muted)' }}>
+                No tools shared between stages yet.
+              </div>
+              <div style={{ fontSize:11, color:'var(--muted)', marginTop:4 }}>
+                Assign the same agent to multiple stages to enable skill sharing.
+              </div>
+            </div>
+          ) : (
+            <div className="card" style={{ padding:14, textAlign:'center' }}>
+              <Wrench size={20} style={{ color:'var(--muted)', marginBottom:8 }}/>
+              <div style={{ fontSize:12, color:'var(--muted)' }}>
+                Assign agents with tools to stages to see shared skill coverage here.
+              </div>
+            </div>
+          )}
+
+          {/* Pipeline stats summary */}
+          <div className="card" style={{ padding:12, marginTop:16 }}>
+            <div style={{ fontSize:11, fontWeight:600, color:'var(--muted)', marginBottom:10 }}>Pipeline Stats</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              {[
+                { label:'Stages', value: pipeline.stages.length },
+                { label:'AI stages', value: aiStages.length },
+                { label:'Human gates', value: pipeline.stages.length - aiStages.length },
+                { label:'With prompt', value: promptedCount },
+                { label:'Unique agents', value: Object.values(agentRoster).filter(r => r.agent).length },
+                { label:'Shared tools', value: sharedTools.length },
+              ].map(({ label, value }) => (
+                <div key={label} style={{ textAlign:'center', padding:'6px 0' }}>
+                  <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)' }}>{value}</div>
+                  <div style={{ fontSize:10, color:'var(--muted)' }}>{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Import Modal ──────────────────────────────────────────────────────────────
 
 function ImportModal({ onImport, onClose }: {
@@ -266,6 +619,7 @@ export default function PipelineEditor() {
   const [fetchingColumns, setFetchingColumns] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [viewMode, setViewMode] = useState(!isNew)  // blueprint by default for existing pipelines
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setConnectors).catch(() => {})
@@ -483,23 +837,57 @@ export default function PipelineEditor() {
         <div style={{ flex:1 }}/>
         {dirty && <span style={{ fontSize:11, color:'var(--yellow)' }}>unsaved</span>}
 
-        <button className="btn btn-ghost" onClick={() => setShowImport(true)} style={{ fontSize:12, padding:'6px 10px' }}
-          title="Import pipeline from YAML">
-          <Upload size={14}/> Import
-        </button>
-        <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
-          title="Export pipeline as YAML" disabled={isNew}>
-          <Download size={14}/> Export
-        </button>
-        <button className="btn btn-primary" onClick={save} disabled={saving || !pipeline.id || !pipeline.name}>
-          <Save size={14}/> {saving ? 'Saving…' : 'Save'}
-        </button>
+        {/* Mode toggle */}
+        <div style={{ display:'flex', borderRadius:6, border:'1px solid var(--border)', overflow:'hidden' }}>
+          <button
+            className={`btn ${viewMode ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius:0, padding:'5px 10px', fontSize:12, gap:5 }}
+            onClick={() => setViewMode(true)}>
+            <Eye size={13}/> Blueprint
+          </button>
+          <button
+            className={`btn ${!viewMode ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius:0, padding:'5px 10px', fontSize:12, gap:5, borderLeft:'1px solid var(--border)' }}
+            onClick={() => setViewMode(false)}>
+            <Pencil size={13}/> Edit
+          </button>
+        </div>
+
+        {viewMode ? (
+          <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
+            title="Export pipeline as YAML" disabled={isNew}>
+            <Download size={14}/> Export
+          </button>
+        ) : (
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowImport(true)} style={{ fontSize:12, padding:'6px 10px' }}
+              title="Import pipeline from YAML">
+              <Upload size={14}/> Import
+            </button>
+            <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
+              title="Export pipeline as YAML" disabled={isNew}>
+              <Download size={14}/> Export
+            </button>
+            <button className="btn btn-primary" onClick={save} disabled={saving || !pipeline.id || !pipeline.name}>
+              <Save size={14}/> {saving ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Main content — two columns */}
+      {/* ── Blueprint / Editor content ── */}
+      {viewMode ? (
+        <div style={{ flex:1, overflow:'auto' }}>
+          <PipelineBlueprint
+            pipeline={pipeline}
+            agents={agents}
+            onEditStage={idx => { setViewMode(false); setSelectedStage(idx) }}
+            onEdit={() => setViewMode(false)}
+          />
+        </div>
+      ) : (
       <div style={{ display:'flex', flex:1, gap:16, overflow:'hidden' }}>
-        {/* Left: pipeline config + stages */}
-        <div style={{ width:320, flexShrink:0, overflow:'auto', paddingRight:8 }}>
+        {/* Left: pipeline config + stages */}        <div style={{ width:320, flexShrink:0, overflow:'auto', paddingRight:8 }}>
           {/* Basic info */}
           <div style={{ marginBottom:20 }}>
             <label className="form-label">Pipeline ID</label>
@@ -912,6 +1300,7 @@ export default function PipelineEditor() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }
