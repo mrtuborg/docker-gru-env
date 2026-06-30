@@ -266,6 +266,13 @@ class GitHubConnector(GruConnector):
             if resp.status_code != 200:
                 body = resp.text
                 logger.error("Device flow start failed (%d): %s", resp.status_code, body)
+                if resp.status_code == 404:
+                    # App was deleted on GitHub — clear stale credentials
+                    from ..vault import delete_secret
+                    await delete_secret(self.plugin_id, _APP_CLIENT_ID_KEY)
+                    await delete_secret(self.plugin_id, _APP_CLIENT_SECRET_KEY)
+                    logger.info("Cleared stale app credentials for %s", self.plugin_id)
+                    raise ValueError("__needs_manifest__")
                 try:
                     err = resp.json().get("error", "")
                     if err == "device_flow_disabled":

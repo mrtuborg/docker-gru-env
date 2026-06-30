@@ -170,7 +170,10 @@ async def start_device_flow(plugin_id: str, request: Request):
             "interval":         flow.get("interval", 5),
         }
     except ValueError as exc:
-        raise HTTPException(400, str(exc))
+        msg = str(exc)
+        if msg == "__needs_manifest__":
+            raise HTTPException(400, detail={"needs_manifest": True, "message": "GitHub App was deleted — please re-register"})
+        raise HTTPException(400, msg)
     except Exception as exc:
         raise HTTPException(500, str(exc))
 

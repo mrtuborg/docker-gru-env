@@ -16,8 +16,13 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
       .then(async r => {
         const d = await r.json()
         if (!r.ok) {
+          // Structured error: app was deleted, need to re-register
+          if (d.detail?.needs_manifest || d.needs_manifest) {
+            setStatus('needs_manifest')
+            return
+          }
           setStatus('error')
-          setMessage(d.detail || 'Failed to start device flow')
+          setMessage(d.detail || d.message || 'Failed to start device flow')
           return
         }
         setFlowData(d)
