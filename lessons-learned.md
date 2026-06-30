@@ -35,3 +35,17 @@
 - [2026-06-25] **Config portability design: never export secrets** — the `gru-server.yaml` export format omits all tokens, passwords, and credentials. After import, each connector requires re-auth. This makes the config file safe to commit to a repo or store in an Obsidian vault.
 
 - [2026-06-25] **Pipeline phase 1 implementation is purely additive** — the pipeline engine, CRUD API, and UI were already fully implemented in a prior session. Phase 1 (resource bindings) adds a new `pipeline_bindings` table and capability methods on connectors without touching the engine or UI. Migration is automatic: existing `plugin_id` auto-creates a `board` binding.
+
+- [2026-06-30] **GitHub App user tokens (`ghu_*`) are rejected by some GHE instances** — After completing the GitHub App manifest + device flow, the resulting `ghu_*` token returns 401 on `GET /api/v3/user`. Use a **classic PAT** with `repo,project,read:org` scopes instead. Add a PAT field to the GitHub connector Configure form as an alternative auth path.
+
+- [2026-06-30] **PAT must be saved via `POST /auth/pat`, not `PUT /credentials`** — The correct backend endpoint for storing a PAT directly is `POST /api/plugins/{id}/auth/pat`. A non-existent `PUT /credentials` route was silently failing; the PAT appeared to save but was never stored in the vault.
+
+- [2026-06-30] **OAuthModal should check `has_token` before starting device flow** — If a PAT is already stored, `GET /auth/status` returns `{has_token: true}`. The modal should show success immediately instead of trying device flow (which fails on GHE with the App token).
+
+- [2026-06-30] **Deleted GitHub Apps cause 404 on device flow — clear client_id automatically** — When a GitHub App is deleted on GHE, the stale `app_client_id` remains in vault. The next device flow attempt gets a 404. Backend now detects 404, deletes `app_client_id` + `app_client_secret` from vault, and returns `{needs_manifest: true}` so the frontend auto-shows the re-registration step.
+
+- [2026-06-30] **`boards.py` must parse `board_url` to get project owner/number** — The connector config stores `board_url` (e.g. `https://sensio.ghe.com/orgs/roommate/projects/14`) but `boards.py` was reading `project_owner`/`project_number` fields directly (which don't exist). Use a `_parse_board_url()` helper with regex `/(?:orgs|users)/([^/]+)/projects/(\d+)`.
+
+- [2026-06-30] **GitHub Projects v2 board columns via GraphQL work perfectly with PAT on GHE** — `POST /api/graphql` with `organization.projectV2.field(name:"Status").options` returns all column names. The `organization` vs `user` entity type must be detected first via `GET /api/v3/orgs/{owner}`.
+
+- [2026-06-30] **Boards page should show pipeline activity, not a GH board clone** — The page should fetch `/api/pipelines/{id}/status` and display queued/active/recent items, not replicate the GitHub Projects board columns. The engine's `_query_board()` can be called even when the engine is stopped to populate the queue list for display.
