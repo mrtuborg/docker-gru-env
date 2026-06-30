@@ -71,6 +71,13 @@ else
     AZURE_MOUNT=(-v "$AZURE_DIR:/root/.azure")
   fi
 
+  # Mount the roommate-sensei-o repo so seed.py can read hil-stress/config.yml
+  WORK_DIR="${GRU_WORK_DIR:-$HOME/ws/roommate-sensei-o}"
+  WORK_MOUNT=()
+  if [[ -d "$WORK_DIR" ]]; then
+    WORK_MOUNT=(-v "$WORK_DIR:/work:ro")
+  fi
+
   SEED_ENVS=()
   if [[ $SEED -eq 1 ]]; then
     SEED_ENVS+=(-e "GRU_SEED=1")
@@ -84,6 +91,7 @@ else
     -p "${PORT}:9400" \
     -v "${VOLUME}:/data" \
     "${AZURE_MOUNT[@]}" \
+    "${WORK_MOUNT[@]}" \
     "${SEED_ENVS[@]}" \
     "$IMAGE"
 fi
