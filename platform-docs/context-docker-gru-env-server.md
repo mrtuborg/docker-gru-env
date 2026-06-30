@@ -2,7 +2,7 @@
 
 ## Track: feature/gru-server — gru-server standalone web UI
 
-**Branch:** `feature/gru-server`
+**Branch:** `feature/gru-server` (main) / `vladimir-nosenko-pipeline-editor-page` (active worktree)
 **Repo:** `/Users/vn/ws/platform-development/docker-gru-env-server`
 **Active project:** N/A (no GHE project board — tracked in repo directly)
 
@@ -12,52 +12,81 @@ Building `gru-server` — a standalone Docker container mode with a React web UI
 for configuring and authenticating connectors (GitHub, Azure, Copilot, Obsidian Sync),
 plus a pipeline engine that drives the HIL stress-test workflow against GitHub Projects v2.
 
+### Pipeline Editor — COMPLETE (as of 2026-07-01)
+
+The Pipeline Editor page is fully implemented at `/#/pipelines/:id`:
+- **Blueprint view** (default): Stage Flow cards, Agent Roster, Shared Tools bar chart, Pipeline Stats with Running/Paused status dot
+- **Edit view**: stage CRUD, up/down reorder, prompt editor with template variable chips, per-stage agent assignment, YAML import (modal, paste/upload), YAML export
+- **Top bar**: pipeline selector dropdown, Blueprint/Edit toggle, Start/Pause button (now working — backend bug fixed), Import/Export/Save, Ctrl+S shortcut, inline error banners (no more `alert()`)
+- **Pipelines list page** eliminated — `/pipelines` now redirects to first pipeline
+
 ### Issue Status
 
-No GHE project board. Work tracked via commits on `feature/gru-server`.
+No GHE project board. Work tracked via commits.
 
-Latest HEAD: `3182776` pushed to `origin/feature/gru-server`.
+Latest commits on `vladimir-nosenko-pipeline-editor-page`:
+- `b51867e` fix(pipeline-editor): senior dev + UX review — 8 issues fixed
+- `7e99560` refactor(pipelines): remove list page, Start/Stop into Blueprint bar
+- `0c7fec0` fix(pipelines): remove extra click to reach Blueprint
+- `ee33824` feat(pipeline-editor): Blueprint view — agent roster + shared tools
+- `102a2ba` fix(pipeline-editor): 6 bugs + 3 UX improvements from senior/UX review
 
 ### Needs Human
 
 - **End-to-end Obsidian Sync test** — requires an active Obsidian Sync subscription.
 - **End-to-end Copilot connector test** — go through wizard, add GitHub → authorize OAuth → add Copilot → verify health.
-- **GitHub App must be re-registered on GHE if deleted** — Authorize button auto-detects deleted app (404 on device flow), clears stale client_id and shows manifest flow again. But user must manually click "Register GitHub App →" then complete device flow. Alternatively: use a classic PAT (recommended for GHE — GitHub App user tokens `ghu_*` return 401 on some GHE versions).
+- **GitHub App must be re-registered on GHE if deleted** — use a classic PAT instead (recommended for GHE).
 
 ### Device State
 
 - Container: `gru-server-dev` running on port 9400
-- Volume: `gru-data` (has seeded hil-stress pipeline + ghe-roommate connector with PAT auth)
+- Volume: `gru-data` (has seeded `hil-stress` pipeline + `ghe-roommate` connector with PAT auth)
 - Mount: `~/.azure:/root/.azure`
-- Image: built from HEAD of `feature/gru-server`
 - Connector `ghe-roommate`: **HEALTHY** (authenticated as @vlad via classic PAT)
-- Pipeline `hil-stress`: **stopped** (not yet started), 6 queued issues visible on Boards page
+- Pipeline `hil-stress`: **stopped**, 6 queued issues (Todo stage), 0 agents loaded
 - Run commands:
   ```bash
   cd /Users/vn/ws/platform-development/docker-gru-env-server
   ./server-run.sh                        # start (existing volume)
   ./server-run.sh --fresh                # wipe + restart
-  ./server-run.sh --seed hil-stress/config.yml   # seed pipeline config
   ./server-build.sh                      # rebuild image
+  # Hot-deploy frontend:
+  npm --prefix web run build && docker cp server/static/. gru-server-dev:/app/server/static/
+  # Hot-deploy backend:
+  docker cp server/routers/pipelines.py gru-server-dev:/app/server/routers/pipelines.py && docker restart gru-server-dev
   ```
 
 ### Next Action
 
-**Pipeline Editor page** — the next session should implement a new page at `/#/pipeline-editor`
-(or rename the existing `PipelineEditor.tsx` skeleton) that lets users:
-1. View the list of pipeline stages (currently stored in DB as `pipeline_stages` rows)
-2. Add / edit / reorder stages visually
-3. Set per-stage prompt (text area), actor (ai/human), column (GH Project column picker)
-4. Import / export pipeline config as YAML (same format as `hil-stress/config.yml`)
+**First pipeline run — agents and skills bootstrap.**
 
-Key files:
-- `web/src/pages/PipelineEditor.tsx` — skeleton exists, needs full implementation
-- `server/routers/pipelines.py` — CRUD endpoints for stages already exist
-- `server/db/config.py` — `upsert_pipeline`, `get_pipeline`, `list_pipeline_stages`
-- `seed.py` — shows the YAML format used for import
+Goal: make `hil-stress` pipeline actually execute one issue end-to-end via `gh copilot`.
 
-The Boards page now shows queued/active/recent activity correctly.
-The Connectors page shows PAT input, OAuth modal handles stale app recovery.
+Key facts about the engine:
+- `pipeline_engine.py` already handles `agent_id` in stage config: looks up agent from DB → writes `~/.copilot/agents/{id}.agent.md` → runs `gh copilot --agent {id} -p <task_prompt>`
+- If no `agent_id`: runs `gh copilot -p <full_prompt>` (inline prompt mode)
+- `GET /api/agents` returns `[]` — no agents loaded yet
+- Agents can be imported via `POST /api/agents/import/file`, `POST /api/agents/import/upload`, or `POST /api/agents/import/repo`
+
+Reference project at `/Users/vn/ws/roommate-sensei-o/`:
+- `hil-stress/stage-prompts/*.md` — plain markdown prompts (Todo, HW-Check, HW-Update, HW-Stress, HW-Log)
+- `skills/` — shared shell skill scripts referenced from stage prompts
+- These are NOT `.agent.md` files — they are raw prompts for inline use
+
+Approach options for next session:
+1. **Inline prompt mode** (quickest): Import stage-prompt content into each `hil-stress` stage's `prompt` field directly (no agents needed). Verify the pipeline can pick and execute an issue.
+2. **Agent mode**: Create `.agent.md` wrapper files for each stage prompt, import into agent library, link to stages via `agent_id`.
+
+The pipeline editor's YAML import can load stage prompts via `stages[].prompt` field.
+
+Prerequisite check: verify `gh copilot` is installed inside the container and authenticated.
+
+Key files for next session:
+- `server/services/pipeline_engine.py` — `_run_session()` builds the `gh copilot` command; `_write_agent_file()` writes agent to `~/.copilot/agents/`
+- `server/routers/agents.py` — agent CRUD + import endpoints
+- `/Users/vn/ws/roommate-sensei-o/hil-stress/stage-prompts/` — source prompts to import
+- `/Users/vn/ws/roommate-sensei-o/skills/` — shared skills referenced from those prompts
+- `hil-stress/config.yml` (in this repo) — seed config with stage_order but no prompts
 
 ---
 
@@ -131,8 +160,8 @@ docker build -f Dockerfile.server -t gru-server:latest .
 | `server/routers/pipelines.py` | Pipelines API — `/status` fetches GH issues even when engine stopped |
 | `server/services/pipeline_engine.py` | Core orchestrator — `_query_board()`, `live_state()`, `_gh_host_for()` |
 | `web/src/pages/Boards.tsx` | Activity feed: queued/active/recent per pipeline (not GH board clone) |
-| `web/src/pages/Pipelines.tsx` | Option B design: Active/Queued/Recent + inline SSE log |
-| `web/src/pages/PipelineEditor.tsx` | Skeleton — next session: full stage editor + import/export |
+| `web/src/pages/PipelineEditor.tsx` | **Full implementation** — Blueprint + Edit modes, YAML import/export, stage CRUD, Ctrl+S |
+| `web/src/pages/Pipelines.tsx` | Redirect only — navigates to first pipeline Blueprint (or /pipelines/new) |
 | `web/src/pages/Wizard.tsx` | Setup wizard — connector cards + auth queue |
 | `web/src/components/ConnectorConfigForm.tsx` | Per-connector config forms; GitHub: host + board_url + PAT |
 | `web/src/components/OAuthModal.tsx` | Auth modal: checks has_token → shows success; needs_manifest → registration |

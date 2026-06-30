@@ -49,3 +49,11 @@
 - [2026-06-30] **GitHub Projects v2 board columns via GraphQL work perfectly with PAT on GHE** — `POST /api/graphql` with `organization.projectV2.field(name:"Status").options` returns all column names. The `organization` vs `user` entity type must be detected first via `GET /api/v3/orgs/{owner}`.
 
 - [2026-06-30] **Boards page should show pipeline activity, not a GH board clone** — The page should fetch `/api/pipelines/{id}/status` and display queued/active/recent items, not replicate the GitHub Projects board columns. The engine's `_query_board()` can be called even when the engine is stopped to populate the queue list for display.
+
+- [2026-07-01] **`get_pipeline()` returns stages with `column_name`; `upsert_pipeline()` expects `column`** — any backend endpoint that reads a pipeline and writes it back (start, stop, run-once) must remap `column_name` → `column` on the stages list before calling `upsert_pipeline`. A `_fix_stage_keys()` helper in `pipelines.py` does this. Without it, start/stop return HTTP 500 with `KeyError: 'column'`.
+
+- [2026-07-01] **Pipeline engine already supports both inline-prompt and agent modes** — in `pipeline_engine.py`, if a stage has `agent_id`, the engine looks up the agent from DB, writes `~/.copilot/agents/{id}.agent.md`, and runs `gh copilot --agent {id} -p <task_prompt>`. If no `agent_id`, it runs `gh copilot -p <full_prompt>` inline. To bootstrap the pipeline with old stage-prompts, just paste the prompt text into each stage's `prompt` field (no agents needed for the first run).
+
+- [2026-07-01] **TOOL_COLORS as a module-level mutable dict is a React anti-pattern** — mutating a global during render violates React's render purity and causes colour inconsistency under StrictMode (double-render assigns different colours). Use a pure deterministic hash function instead: `hash(toolName) mod palette.length`.
+
+- [2026-07-01] **After eliminating the Pipelines list page, the Back button must not navigate to `/pipelines`** — `/pipelines` now redirects to the same pipeline (the first in the list), creating an infinite loop. Back button should navigate to `/` (dashboard) or be removed.
