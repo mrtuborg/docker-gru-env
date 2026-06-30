@@ -194,7 +194,12 @@ export default function Connectors() {
                 </div>
               </div>
 
-              <HealthBadge status={p.health?.status} message={p.health?.message}/>
+              <HealthBadge
+                status={p.health?.status}
+                message={p.health?.message}
+                needsAuth={!!p.health?.extra?.needs_auth}
+                onAuth={() => setOauthConnector(p.id)}
+              />
 
               <div style={{ display:'flex', gap:6, marginTop:12, flexWrap:'wrap' }}>
                 <button className="btn btn-ghost" style={{ fontSize:11, padding:'4px 10px' }} onClick={() => refreshHealth(p.id)}>
