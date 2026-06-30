@@ -41,6 +41,15 @@ if [[ $FRESH -eq 1 ]]; then
   echo "✓ Cleaned up"
 fi
 
+# ── Stop any other container already holding the target port ─────────────────
+BLOCKER=$(docker ps --format '{{.Names}}\t{{.Ports}}' \
+  | awk -F'\t' -v port="$PORT" '$2 ~ port {print $1}' \
+  | grep -v "^${CONTAINER}$" || true)
+if [[ -n "$BLOCKER" ]]; then
+  echo "▶ Port $PORT is held by '$BLOCKER' — stopping it …"
+  docker stop "$BLOCKER"
+fi
+
 # ── If container exists, just start it ───────────────────────────────────────
 if docker inspect "$CONTAINER" &>/dev/null; then
   echo "▶ Starting existing container $CONTAINER …"
