@@ -21,7 +21,7 @@ AZURE_DIR="$HOME/.azure"
 
 FRESH=0
 REBUILD=0
-SEED_CONFIG=""   # empty = not seeding; "-" = use default in image; else = host path
+SEED_CONFIG=""
 
 # ── Parse args ────────────────────────────────────────────────────────────────
 args=("$@")
@@ -46,6 +46,12 @@ while [[ $i -lt ${#args[@]} ]]; do
   esac
   i=$((i+1))
 done
+
+# Validate seed config file exists
+if [[ -n "$SEED_CONFIG" && ! -f "$SEED_CONFIG" ]]; then
+  echo "Error: seed config file not found: $SEED_CONFIG" >&2
+  exit 1
+fi
 
 # ── Rebuild image ─────────────────────────────────────────────────────────────
 if [[ $REBUILD -eq 1 ]]; then
@@ -77,6 +83,15 @@ PORT=$(find_free_port "$PORT")
 if docker inspect "$CONTAINER" &>/dev/null; then
   echo "▶ Starting existing container $CONTAINER …"
   docker start "$CONTAINER"
+
+  # Run seed against already-running container if requested
+  if [[ -n "$SEED_CONFIG" ]]; then
+    HOST_CFG="$(cd "$(dirname "$SEED_CONFIG")" && pwd)/$(basename "$SEED_CONFIG")"
+    echo "▶ Seeding from $HOST_CFG …"
+    docker cp "$HOST_CFG" "$CONTAINER:/tmp/seed-config.yml"
+    docker exec "$CONTAINER" python3 /app/seed.py --config /tmp/seed-config.yml
+    echo "✓ Seed done"
+  fi
 else
   echo "▶ Creating and starting $CONTAINER on port $PORT …"
 
@@ -86,13 +101,12 @@ else
   CONFIG_MOUNT=()
   SEED_ENVS=()
   if [[ -n "$SEED_CONFIG" ]]; then
-    SEED_ENVS+=(-e "GRU_SEED=1")
+    HOST_CFG="$(cd "$(dirname "$SEED_CONFIG")" && pwd)/$(basename "$SEED_CONFIG")"
+    CONFIG_MOUNT=(-v "$HOST_CFG:/app/seed-config.yml:ro")
+    SEED_ENVS+=(-e "GRU_SEED=1" -e "GRU_SEED_CONFIG=/app/seed-config.yml")
     if [[ -n "${GRU_GHE_TOKEN:-}" ]]; then
       SEED_ENVS+=(-e "GRU_GHE_TOKEN=${GRU_GHE_TOKEN}")
     fi
-    HOST_CFG="$(cd "$(dirname "$SEED_CONFIG")" && pwd)/$(basename "$SEED_CONFIG")"
-    CONFIG_MOUNT=(-v "$HOST_CFG:/app/seed-config.yml:ro")
-    SEED_ENVS+=(-e "GRU_SEED_CONFIG=/app/seed-config.yml")
   fi
 
   docker run -d \
@@ -107,7 +121,6 @@ fi
 
 echo "✓ gru-server running at http://localhost:${PORT}"
 if [[ -n "$SEED_CONFIG" ]]; then
-  cfg_label="$( [[ "$SEED_CONFIG" == "-" ]] && echo "built-in hil-stress-config.yml" || echo "$SEED_CONFIG" )"
-  echo "  Seeded from: $cfg_label"
-  echo "  If no token was provided, authorize via Connectors page after startup."
+  echo "  Seeded from: $SEED_CONFIG"
+  [[ -z "${GRU_GHE_TOKEN:-}" ]] && echo "  No token provided — authorize via Connectors page."
 fi
