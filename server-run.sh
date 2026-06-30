@@ -5,8 +5,8 @@
 #   ./server-run.sh                        # start or restart existing container
 #   ./server-run.sh --fresh                # wipe volume + restart
 #   ./server-run.sh --rebuild              # build image first, then --fresh
-#   ./server-run.sh --seed <config.yml>    # seed DB from config file (implies --fresh)
-#   ./server-run.sh --seed                 # seed from baked-in /app/hil-stress-config.yml
+#   ./server-run.sh --seed <config.yml>    # seed DB from config on start (idempotent upsert)
+#   ./server-run.sh --fresh --seed <cfg>   # wipe + seed fresh
 #
 # GRU_GHE_TOKEN env var — GHE PAT to store in vault during seed (optional)
 # GRU_PORT      env var — base port to try (default 9400)
@@ -33,7 +33,6 @@ while [[ $i -lt ${#args[@]} ]]; do
     --rebuild)
       REBUILD=1; FRESH=1 ;;
     --seed)
-      FRESH=1
       next=$((i+1))
       if [[ $next -lt ${#args[@]} && "${args[$next]}" != --* ]]; then
         SEED_CONFIG="${args[$next]}"
