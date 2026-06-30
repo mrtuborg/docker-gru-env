@@ -244,8 +244,25 @@ async def get_status(pipeline_id: str, request: Request):
         raise HTTPException(404, "Pipeline not found")
     engine = request.app.state.engine
     live = engine.live_state(pipeline_id)
+    queued = live["queued"]
+
+    # When engine is stopped/paused, still fetch from GitHub so Boards shows current state
+    if not queued and engine.status(pipeline_id) in ("stopped", "paused"):
+        try:
+            from ..vault import load_secret  # noqa: PLC0415
+            plugin_id = p.get("plugin_id", "")
+            token = await load_secret(plugin_id, "token") if plugin_id else None
+            if token:
+                issues = await engine._query_board(p, token)
+                stages = {s.get("column") or s.get("column_name", "") for s in (p.get("stages") or [])}
+                queued = [
+                    {"number": i.number, "repo": i.repo, "stage": i.stage, "title": i.title}
+                    for i in issues if i.stage in stages
+                ]
+        except Exception:
+            pass  # best-effort; don't fail the endpoint
+
     recent = await list_pipeline_runs(pipeline_id, limit=20)
-    # Flatten recent run items for the last few runs
     recent_items: list[dict] = []
     for run in recent[:5]:
         items = await get_pipeline_run_items(run["id"])
@@ -255,7 +272,7 @@ async def get_status(pipeline_id: str, request: Request):
         "pipeline_id": pipeline_id,
         "status": engine.status(pipeline_id),
         "active": live["active"],
-        "queued": live["queued"],
+        "queued": queued,
         "recent": recent_items[:20],
     }
 
