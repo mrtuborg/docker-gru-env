@@ -74,9 +74,9 @@ async def _insert_pipeline(cfg: dict, dry_run: bool):
     stage_names = watcher.get("stage_order", [])
     stages = []
     for i, name in enumerate(stage_names):
-        stages.append({"column_name": name, "actor": "ai", "stage_index": i})
+        stages.append({"column": name, "actor": "ai", "stage_index": i})
     # final human review stage
-    stages.append({"column_name": "Review", "actor": "human", "stage_index": len(stages)})
+    stages.append({"column": "Review", "actor": "human", "stage_index": len(stages)})
 
     models_raw = watcher.get("models", [{"model": "claude-sonnet-4.6", "priority": 1}])
 
