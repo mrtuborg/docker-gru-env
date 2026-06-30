@@ -86,12 +86,13 @@ function normalizeStage(s: any): Stage {
   }
 }
 
-/** Escape a YAML string value — wrap in quotes if it contains special chars */
-function yamlStr(s: string): string {
+/** Escape a YAML string value. indentSpaces = spaces before the key line. */
+function yamlStr(s: string, indentSpaces = 0): string {
+  if (s == null) return '""'
   if (!s) return '""'
   if (s.includes('\n')) {
-    const indent = '      '
-    return '|\n' + s.split('\n').map(l => indent + l).join('\n')
+    const contentIndent = ' '.repeat(indentSpaces + 2)
+    return '|\n' + s.split('\n').map(l => contentIndent + l).join('\n')
   }
   if (/[:#{}[\],&*?|>!'"%@`]/.test(s) || s.trim() !== s) return JSON.stringify(s)
   return s
@@ -122,18 +123,18 @@ function exportYaml(p: PipelineData): string {
   if (p.stages.length > 0) {
     lines.push('stages:')
     for (const s of p.stages) {
-      lines.push(`  - column: ${yamlStr(s.column)}`)
+      lines.push(`  - column: ${yamlStr(s.column, 4)}`)
       lines.push(`    actor: ${s.actor}`)
-      if (s.agent_id) lines.push(`    agent_id: ${yamlStr(s.agent_id)}`)
-      if (s.task_prompt) lines.push(`    task_prompt: ${yamlStr(s.task_prompt)}`)
-      if (s.prompt) lines.push(`    prompt: ${yamlStr(s.prompt)}`)
-      if (s.on_success) lines.push(`    on_success: ${yamlStr(s.on_success)}`)
-      if (s.on_failure) lines.push(`    on_failure: ${yamlStr(s.on_failure)}`)
-      if (s.on_timeout) lines.push(`    on_timeout: ${yamlStr(s.on_timeout)}`)
+      if (s.agent_id) lines.push(`    agent_id: ${yamlStr(s.agent_id, 4)}`)
+      if (s.task_prompt) lines.push(`    task_prompt: ${yamlStr(s.task_prompt, 4)}`)
+      if (s.prompt) lines.push(`    prompt: ${yamlStr(s.prompt, 4)}`)
+      if (s.on_success) lines.push(`    on_success: ${yamlStr(s.on_success, 4)}`)
+      if (s.on_failure) lines.push(`    on_failure: ${yamlStr(s.on_failure, 4)}`)
+      if (s.on_timeout) lines.push(`    on_timeout: ${yamlStr(s.on_timeout, 4)}`)
       if (Object.keys(s.env).length > 0) {
         lines.push('    env:')
         for (const [k, v] of Object.entries(s.env)) {
-          lines.push(`      ${k}: ${yamlStr(v)}`)
+          lines.push(`      ${k}: ${yamlStr(v, 6)}`)
         }
       }
     }
@@ -150,11 +151,12 @@ function exportYaml(p: PipelineData): string {
 // ── Import Modal ──────────────────────────────────────────────────────────────
 
 function ImportModal({ onImport, onClose }: {
-  onImport: (yaml: string, pipelineId?: string) => void
+  onImport: (yaml: string, pipelineId?: string, overwrite?: boolean) => Promise<void>
   onClose: () => void
 }) {
   const [yamlText, setYamlText] = useState('')
   const [pipelineId, setPipelineId] = useState('')
+  const [overwrite, setOverwrite] = useState(false)
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
 
@@ -168,15 +170,15 @@ function ImportModal({ onImport, onClose }: {
       const text = await navigator.clipboard.readText()
       setYamlText(text)
       setError('')
-    } catch { /* clipboard permission denied */ }
+    } catch { setError('Clipboard permission denied — paste manually below') }
   }
 
   const handleImport = async () => {
-    if (!yamlText.trim()) { setError('Paste or upload YAML content'); return }
+    if (!yamlText.trim()) { setError('Paste or upload YAML content first'); return }
     setImporting(true)
     setError('')
     try {
-      onImport(yamlText, pipelineId || undefined)
+      await onImport(yamlText, pipelineId || undefined, overwrite)
     } catch (e: any) {
       setError(e.message)
     } finally {
@@ -191,7 +193,7 @@ function ImportModal({ onImport, onClose }: {
     }} onClick={onClose}>
       <div style={{
         background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12,
-        padding:24, width:560, maxHeight:'80vh', overflow:'auto',
+        padding:24, width:580, maxHeight:'85vh', overflow:'auto',
       }} onClick={e => e.stopPropagation()}>
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
           <h2 style={{ fontSize:16, fontWeight:600 }}>Import Pipeline from YAML</h2>
@@ -199,21 +201,13 @@ function ImportModal({ onImport, onClose }: {
         </div>
 
         <div style={{ marginBottom:12 }}>
-          <label className="form-label">Pipeline ID (optional — auto-generated from name if blank)</label>
+          <label className="form-label">Pipeline ID <span style={{ color:'var(--muted)', fontWeight:400 }}>(optional — derived from name if blank)</span></label>
           <input className="form-input" value={pipelineId}
             onChange={e => setPipelineId(e.target.value)}
             placeholder="e.g. my-pipeline"/>
         </div>
 
-        <div style={{ marginBottom:12 }}>
-          <label className="form-label">YAML Config</label>
-          <textarea className="form-input" rows={14} value={yamlText}
-            onChange={e => { setYamlText(e.target.value); setError('') }}
-            placeholder={'name: My Pipeline\nstages:\n  - column: Todo\n    actor: ai\n    prompt: "Process issue #${ISSUE_NUM}"\n  - column: Review\n    actor: human'}
-            style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
-        </div>
-
-        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
           <label className="btn btn-secondary" style={{ fontSize:12, cursor:'pointer' }}>
             <FileUp size={12}/> Upload .yml
             <input type="file" accept=".yml,.yaml" hidden onChange={handleFile}/>
@@ -223,7 +217,26 @@ function ImportModal({ onImport, onClose }: {
           </button>
         </div>
 
-        {error && <div style={{ color:'var(--red)', fontSize:12, marginBottom:12 }}>{error}</div>}
+        <div style={{ marginBottom:12 }}>
+          <label className="form-label">YAML Config</label>
+          <textarea className="form-input" rows={14} value={yamlText}
+            onChange={e => { setYamlText(e.target.value); setError('') }}
+            placeholder={'name: My Pipeline\nplugin_id: ghe-roommate\nstages:\n  - column: Todo\n    actor: ai\n    prompt: "Process issue #${ISSUE_NUM}"\n  - column: Review\n    actor: human'}
+            style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
+        </div>
+
+        <label style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16, cursor:'pointer', fontSize:13 }}>
+          <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)}/>
+          Overwrite if pipeline ID already exists
+        </label>
+
+        {error && (
+          <div style={{
+            color:'var(--red)', fontSize:12, marginBottom:12,
+            padding:'8px 10px', background:'color-mix(in srgb, var(--red) 10%, transparent)',
+            borderRadius:6, border:'1px solid color-mix(in srgb, var(--red) 25%, transparent)',
+          }}>{error}</div>
+        )}
 
         <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
@@ -304,9 +317,17 @@ export default function PipelineEditor() {
 
   const removeStage = (idx: number) => {
     if (!pipeline) return
+    const stage = pipeline.stages[idx]
+    if (stage.prompt || stage.task_prompt) {
+      if (!window.confirm(`Remove stage "${stage.column || '(unnamed)'}"? Its prompt will be lost.`)) return
+    }
     const stages = pipeline.stages.filter((_, i) => i !== idx)
     update({ stages })
-    setSelectedStage(Math.min(selectedStage, stages.length - 1))
+    setSelectedStage(prev => {
+      if (prev === idx) return Math.min(idx, stages.length - 1)
+      if (prev > idx) return prev - 1
+      return prev
+    })
   }
 
   const moveStage = (idx: number, direction: -1 | 1) => {
@@ -321,6 +342,8 @@ export default function PipelineEditor() {
 
   const fetchColumns = async () => {
     if (!pipeline?.plugin_id || !pipeline.project_owner || !pipeline.project_number) return
+    const hasContent = pipeline.stages.some(s => s.prompt || s.task_prompt)
+    if (hasContent && !window.confirm('Fetching board columns will replace all current stages and their prompts. Continue?')) return
     setFetchingColumns(true)
     try {
       const resp = await fetch(
@@ -372,6 +395,19 @@ export default function PipelineEditor() {
     }
   }
 
+  // Unsaved-changes guard — browser back/refresh
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
+
+  const navigateSafe = (path: string) => {
+    if (dirty && !window.confirm('You have unsaved changes. Leave without saving?')) return
+    navigate(path)
+  }
+
   const handleExport = () => {
     if (!pipeline) return
     const yaml = exportYaml(pipeline)
@@ -384,7 +420,11 @@ export default function PipelineEditor() {
     URL.revokeObjectURL(url)
   }
 
-  const handleImport = async (yamlText: string, pipelineId?: string) => {
+  const handleImport = async (yamlText: string, pipelineId?: string, overwrite?: boolean) => {
+    // If overwrite requested, delete existing pipeline first
+    if (overwrite && pipelineId) {
+      await fetch(`/api/pipelines/${pipelineId}`, { method: 'DELETE' })
+    }
     const resp = await fetch('/api/pipelines/import', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -392,8 +432,7 @@ export default function PipelineEditor() {
     })
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({ detail: 'Import failed' }))
-      alert(err.detail || 'Import failed')
-      return
+      throw new Error(err.detail || 'Import failed')
     }
     const imported = await resp.json()
     setShowImport(false)
@@ -421,7 +460,7 @@ export default function PipelineEditor() {
         display:'flex', alignItems:'center', gap:12,
         padding:'0 0 16px', borderBottom:'1px solid var(--border)', marginBottom:16,
       }}>
-        <button className="btn btn-ghost" onClick={() => navigate('/pipelines')} style={{ padding:'6px 8px' }}>
+        <button className="btn btn-ghost" onClick={() => navigateSafe('/pipelines')} style={{ padding:'6px 8px' }}>
           <ArrowLeft size={16}/>
         </button>
 
@@ -431,8 +470,8 @@ export default function PipelineEditor() {
           value={pipeline.id}
           onChange={e => {
             const val = e.target.value
-            if (val === '__new__') navigate('/pipelines/new')
-            else if (val) navigate(`/pipelines/${val}`)
+            if (val === '__new__') navigateSafe('/pipelines/new')
+            else if (val) navigateSafe(`/pipelines/${val}`)
           }}
           style={{ width:200, fontSize:13, fontWeight:600 }}
         >
@@ -506,7 +545,14 @@ export default function PipelineEditor() {
           {/* Stages */}
           <div className="section-label">Stages</div>
           <div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:12 }}>
-            {pipeline.stages.map((stage, i) => (
+            {pipeline.stages.length === 0 ? (
+              <div style={{
+                padding:'16px 12px', textAlign:'center', color:'var(--muted)', fontSize:12,
+                border:'1px dashed var(--border)', borderRadius:6,
+              }}>
+                No stages yet. Fetch from board or add manually.
+              </div>
+            ) : pipeline.stages.map((stage, i) => (
               <div key={i}
                 className={`card card-interactive ${selectedStage === i ? 'card-active' : ''}`}
                 onClick={() => setSelectedStage(i)}
@@ -534,6 +580,14 @@ export default function PipelineEditor() {
                   {stage.actor === 'ai' ? <Bot size={12}/> : <User size={12}/>}
                 </div>
                 <span style={{ flex:1, fontSize:13, fontWeight:500 }}>{stage.column || '(unnamed)'}</span>
+                {/* Prompt indicator */}
+                {(stage.prompt || stage.task_prompt) && (
+                  <span title={`${(stage.prompt || stage.task_prompt).length} chars`} style={{
+                    fontSize:9, padding:'1px 4px', borderRadius:3,
+                    background:'color-mix(in srgb, var(--accent) 20%, transparent)',
+                    color:'var(--accent)', fontWeight:600,
+                  }}>P</span>
+                )}
                 <button className="btn btn-ghost" style={{ padding:2 }}
                   onClick={e => { e.stopPropagation(); removeStage(i) }}>
                   <Trash2 size={12}/>
@@ -581,6 +635,9 @@ export default function PipelineEditor() {
                   update({ models })
                 }}>
                 {DEFAULT_MODELS.map(dm => <option key={dm} value={dm}>{dm}</option>)}
+                {!DEFAULT_MODELS.includes(m.model) && m.model && (
+                  <option key={m.model} value={m.model}>{m.model}</option>
+                )}
               </select>
               <input className="form-input" type="number" value={m.priority} style={{ width:50 }}
                 onChange={e => {
