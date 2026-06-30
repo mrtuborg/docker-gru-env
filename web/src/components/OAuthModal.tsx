@@ -41,11 +41,13 @@ export default function OAuthModal({ connectorId, onClose, inline }: OAuthModalP
   }
 
   useEffect(() => {
-    // First check auth status — if needs_manifest, show registration step instead of device flow
+    // First check auth status — if already has token (PAT or prior OAuth), show success
     fetch(`/api/plugins/${connectorId}/auth/status`)
       .then(async r => {
         const d = await r.json()
-        if (d.needs_manifest) {
+        if (d.has_token) {
+          setStatus('success')
+        } else if (d.needs_manifest) {
           setStatus('needs_manifest')
         } else {
           startDeviceFlow()

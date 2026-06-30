@@ -100,7 +100,7 @@ function EditConnectorModal({ plugin, onClose, onSaved }: { plugin: any; onClose
       })
       if (!r.ok) { const d = await r.json(); throw new Error(d.detail || 'Save failed') }
       if (token) {
-        await fetch(`/api/plugins/${plugin.id}/credentials`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ type:'pat', token }) })
+        await fetch(`/api/plugins/${plugin.id}/auth/pat`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ token }) })
       }
       onSaved()
     } catch(e: any) { setError(e.message) }
