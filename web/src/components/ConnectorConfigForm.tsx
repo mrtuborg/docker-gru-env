@@ -22,6 +22,8 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'Hostname only — no https://. Use GHE hostname for enterprise.', defaultValue: 'github.com', required: true, wizard: true },
     { key: 'board_url', label: 'Project Board URL', type: 'text', placeholder: 'https://github.com/orgs/myorg/projects/5',
       hint: 'Full URL of the GitHub Projects v2 board. Owner and number are parsed automatically.' },
+    { key: 'token', label: 'Personal Access Token (PAT)', type: 'password', placeholder: 'ghp_… or ghs_…',
+      hint: 'Classic PAT with repo, project, read:org scopes. Leave blank to use OAuth device flow instead.' },
     { key: 'data_repo', label: 'Data Repository', type: 'text', placeholder: 'owner/repo',
       hint: 'Repo that stores session logs, cost reports, and attribution DB.' },
     // Pages
