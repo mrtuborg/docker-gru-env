@@ -68,32 +68,45 @@ async def import_pipeline(body: ImportRequest):
     if existing:
         raise HTTPException(409, f"Pipeline '{pid}' already exists")
 
-    # Build stages from stage_order
-    stage_order = cfg.get("stage_order", [])
-    queue_stages = set(cfg.get("queue_stages", []))
-    prompts_dir = Path(body.prompts_dir) if body.prompts_dir else None
-
+    # Build stages — support both new `stages` array and legacy `stage_order` list
     stages = []
-    # Collect all known columns: stage_order columns are AI, others are human
-    for col_name in stage_order:
-        prompt = ""
-        if prompts_dir:
-            # Try exact match, then with spaces replaced
-            for candidate in [col_name, col_name.replace(" ", "_")]:
-                prompt_file = prompts_dir / f"{candidate}.md"
-                if prompt_file.exists():
-                    prompt = prompt_file.read_text()
-                    break
-        stages.append({
-            "column": col_name,
-            "actor": "ai",
-            "prompt": prompt,
-        })
-
-    # Add human gate stages that aren't in stage_order but are common
-    for human_col in ["Backlog", "Review", "Done"]:
-        if human_col not in stage_order and human_col not in [s["column"] for s in stages]:
-            stages.append({"column": human_col, "actor": "human"})
+    if cfg.get("stages") and isinstance(cfg["stages"], list):
+        # New format: stages array with column/actor/prompt/etc
+        for s in cfg["stages"]:
+            if not isinstance(s, dict):
+                continue
+            stages.append({
+                "column": s.get("column", ""),
+                "actor": s.get("actor", "ai"),
+                "agent_id": s.get("agent_id", ""),
+                "task_prompt": s.get("task_prompt", ""),
+                "prompt": s.get("prompt", ""),
+                "on_success": s.get("on_success", ""),
+                "on_failure": s.get("on_failure", ""),
+                "on_timeout": s.get("on_timeout", ""),
+                "env": s.get("env", {}),
+            })
+    else:
+        # Legacy format: stage_order list of column names
+        stage_order = cfg.get("stage_order", [])
+        prompts_dir = Path(body.prompts_dir) if body.prompts_dir else None
+        for col_name in stage_order:
+            prompt = ""
+            if prompts_dir:
+                for candidate in [col_name, col_name.replace(" ", "_")]:
+                    prompt_file = prompts_dir / f"{candidate}.md"
+                    if prompt_file.exists():
+                        prompt = prompt_file.read_text()
+                        break
+            stages.append({
+                "column": col_name,
+                "actor": "ai",
+                "prompt": prompt,
+            })
+        # Add human gate stages that aren't in stage_order but are common
+        for human_col in ["Backlog", "Review", "Done"]:
+            if human_col not in stage_order and human_col not in [s["column"] for s in stages]:
+                stages.append({"column": human_col, "actor": "human"})
 
     # Build models list
     models = []
