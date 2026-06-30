@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
   Upload, Download, RefreshCw, ArrowUp, ArrowDown, X,
-  FileUp, Clipboard, Eye, Pencil, Layers, Wrench, ArrowRight,
+  FileUp, Clipboard, Eye, Pencil, Layers, Wrench, ArrowRight, Play, Pause,
 } from 'lucide-react'
 
 interface Stage {
@@ -619,7 +619,9 @@ export default function PipelineEditor() {
   const [fetchingColumns, setFetchingColumns] = useState(false)
   const [dirty, setDirty] = useState(false)
   const [showImport, setShowImport] = useState(false)
-  const [viewMode, setViewMode] = useState(!isNew)  // blueprint by default for existing pipelines
+  const [viewMode, setViewMode] = useState(!isNew)
+  const [running, setRunning] = useState(false)
+  const [toggling, setToggling] = useState(false)
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setConnectors).catch(() => {})
@@ -639,6 +641,7 @@ export default function PipelineEditor() {
       fetch(`/api/pipelines/${id}`).then(r => r.json()).then(data => {
         data.stages = (data.stages || []).map(normalizeStage)
         setPipeline(data)
+        setRunning(!!data.enabled)
         if (data.stages.length > 0) setSelectedStage(0)
       })
     }
@@ -717,6 +720,18 @@ export default function PipelineEditor() {
       alert('Failed to fetch columns: ' + e.message)
     } finally {
       setFetchingColumns(false)
+    }
+  }
+
+  const toggleRunning = async () => {
+    if (!pipeline || isNew) return
+    setToggling(true)
+    try {
+      const endpoint = running ? 'stop' : 'start'
+      await fetch(`/api/pipelines/${pipeline.id}/${endpoint}`, { method: 'POST' })
+      setRunning(r => !r)
+    } finally {
+      setToggling(false)
     }
   }
 
@@ -852,6 +867,19 @@ export default function PipelineEditor() {
             <Pencil size={13}/> Edit
           </button>
         </div>
+
+        {/* Start / Pause */}
+        {!isNew && (
+          <button
+            className={`btn ${running ? 'btn-secondary' : 'btn-primary'}`}
+            style={{ fontSize:12, padding:'5px 12px', gap:5 }}
+            onClick={toggleRunning}
+            disabled={toggling}>
+            {running
+              ? <><Pause size={13}/> {toggling ? 'Pausing…' : 'Pause'}</>
+              : <><Play size={13}/> {toggling ? 'Starting…' : 'Start'}</>}
+          </button>
+        )}
 
         {viewMode ? (
           <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
