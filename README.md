@@ -11,6 +11,88 @@ Two modes of operation:
 | **Shell environment** (`source ./gru`) | `gru` script — sourced in your terminal | Developers running Copilot sessions interactively |
 | **Server** (`gru-server`) | `Dockerfile.server` — standalone web UI + API | Fully self-contained, browser-only setup wizard, no host tools needed |
 
+---
+
+## Quick start — gru-server
+
+### First run (build + start)
+
+```bash
+# Build the image
+docker build -f Dockerfile.server -t gru-server:latest .
+
+# Start the container
+docker run -d \
+  --name gru-server \
+  -p 9400:9400 \
+  -v gru-data:/data \
+  -v ~/.azure:/root/.azure \
+  gru-server:latest
+
+# Open the web UI
+open http://localhost:9400
+```
+
+### Day-to-day (start / stop existing container)
+
+```bash
+docker start gru-server     # start
+docker stop gru-server      # stop
+docker logs -f gru-server   # tail logs
+```
+
+### Or use docker-compose
+
+```bash
+docker compose -f docker-compose.server.yml up -d      # start
+docker compose -f docker-compose.server.yml down       # stop
+docker compose -f docker-compose.server.yml logs -f    # tail logs
+```
+
+### Rebuild after code changes
+
+```bash
+docker build -f Dockerfile.server -t gru-server:latest . \
+  && docker rm -f gru-server \
+  && docker run -d \
+       --name gru-server \
+       -p 9400:9400 \
+       -v gru-data:/data \
+       -v ~/.azure:/root/.azure \
+       gru-server:latest
+```
+
+> **Data volume** `gru-data` persists connector config, pipeline definitions, and the
+> encrypted secret vault across container restarts. Drop it with `docker volume rm gru-data`
+> to start fresh.
+>
+> **Azure** `~/.azure` mount is optional — only needed if you use the Azure connector
+> with `az login` credentials.
+
+### Test container name
+
+During development a separate test container runs on the same port with its own volume:
+
+```bash
+# Start / stop the dev container (keeps main gru-server untouched)
+docker start gru-server-test
+docker stop  gru-server-test
+docker logs -f gru-server-test
+
+# Full rebuild of the test container
+docker build -f Dockerfile.server -t gru-server:latest . \
+  && docker rm -f gru-server-test \
+  && docker volume rm gru-data \
+  && docker run -d \
+       --name gru-server-test \
+       -p 9400:9400 \
+       -v gru-data:/data \
+       -v ~/.azure:/root/.azure \
+       gru-server:latest
+```
+
+---
+
 ## What it does
 
 - **`src/cost-sync.py`** — called by the `sessionEnd` hook; reads token telemetry from `events.jsonl` and appends one cost record to `~/.copilot/cost-log.jsonl`
