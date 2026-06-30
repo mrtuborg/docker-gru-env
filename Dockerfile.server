@@ -39,6 +39,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source
 COPY server/ ./server/
+COPY seed.py ./seed.py
 
 # Copy built SPA from web-build stage
 COPY --from=web-build /app/server/static ./server/static
@@ -53,5 +54,8 @@ EXPOSE 9400
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s \
     CMD curl -sf http://localhost:${GRU_PORT}/api/wizard/status || exit 1
 
-ENTRYPOINT ["python3", "-m", "server"]
+# Entrypoint: optionally seed before starting server
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["--host", "0.0.0.0", "--port", "9400", "--data-dir", "/data"]
