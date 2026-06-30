@@ -45,12 +45,15 @@ async def _insert_connector(cfg: dict, token: str | None, dry_run: bool):
 
     gh_host = cfg.get("gh_host", "github.com")
     project = cfg.get("project", {})
+    owner = project.get("owner", "")
+    number = project.get("number", 0)
+    # Store as board_url — backend parses owner/number from it
+    board_url = f"https://{gh_host}/orgs/{owner}/projects/{number}" if owner and number else ""
     connector_cfg = {
-        "host":           gh_host,
-        "project_owner":  project.get("owner", ""),
-        "project_number": project.get("number", 0),
+        "host":      gh_host,
+        "board_url": board_url,
     }
-    print(f"  connector: {CONNECTOR_ID} ({gh_host}) owner={connector_cfg['project_owner']}")
+    print(f"  connector: {CONNECTOR_ID} ({gh_host}) board={board_url}")
     if dry_run:
         return
 

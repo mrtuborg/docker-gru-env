@@ -18,17 +18,11 @@ interface Field {
 
 const PLUGIN_FIELDS: Record<string, Field[]> = {
   github: [
-    // Wizard: just the host — auth is handled by OAuth redirect
     { key: 'host', label: 'GitHub Host', type: 'text', placeholder: 'github.com',
       hint: 'Hostname only — no https://. Use GHE hostname for enterprise.', defaultValue: 'github.com', required: true, wizard: true },
-    // Settings: board owner + number (direct) or via URL
-    { key: 'project_owner',  label: 'Project Owner',  type: 'text', placeholder: 'org-name or username',
-      hint: 'GitHub org or user that owns the project board.' },
-    { key: 'project_number', label: 'Project Number', type: 'text', placeholder: '14',
-      hint: 'Project board number (from the board URL).' },
-    { key: 'board_url',     label: 'Project Board URL (alternative)',  type: 'text',   placeholder: 'https://github.com/orgs/myorg/projects/5',
-      hint: 'Full URL — owner and number are parsed automatically. Overrides the fields above if set.' },
-    { key: 'data_repo',     label: 'Data Repository',    type: 'text',   placeholder: 'owner/repo',
+    { key: 'board_url', label: 'Project Board URL', type: 'text', placeholder: 'https://github.com/orgs/myorg/projects/5',
+      hint: 'Full URL of the GitHub Projects v2 board. Owner and number are parsed automatically.' },
+    { key: 'data_repo', label: 'Data Repository', type: 'text', placeholder: 'owner/repo',
       hint: 'Repo that stores session logs, cost reports, and attribution DB.' },
     // Pages
     { key: 'pages_repo',    label: 'Pages Repository',   type: 'text',   placeholder: 'owner/repo (optional)',
@@ -150,7 +144,7 @@ export default function ConnectorConfigForm({ connectorType, initialValues = {},
   const allFields = PLUGIN_FIELDS[connectorType] || []
   const fields = phase === 'wizard' ? allFields.filter(f => f.wizard) : allFields
 
-  // For GitHub: synthesize board_url from host+owner+number if not explicitly stored
+  // For GitHub: synthesize board_url from host+owner+number if not explicitly stored (legacy configs)
   const enriched = { ...initialValues }
   if (connectorType === 'github' && !enriched.board_url && enriched.project_owner && enriched.project_number) {
     const host = enriched.host || 'github.com'
