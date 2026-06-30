@@ -41,14 +41,16 @@ if [[ $FRESH -eq 1 ]]; then
   echo "✓ Cleaned up"
 fi
 
-# ── Stop any other container already holding the target port ─────────────────
-BLOCKER=$(docker ps --format '{{.Names}}\t{{.Ports}}' \
-  | awk -F'\t' -v port="$PORT" '$2 ~ port {print $1}' \
-  | grep -v "^${CONTAINER}$" || true)
-if [[ -n "$BLOCKER" ]]; then
-  echo "▶ Port $PORT is held by '$BLOCKER' — stopping it …"
-  docker stop "$BLOCKER"
-fi
+# ── Find a free port starting from PORT ──────────────────────────────────────
+find_free_port() {
+  local p="$1"
+  while lsof -iTCP:"$p" -sTCP:LISTEN -t &>/dev/null; do
+    echo "  port $p is in use, trying $((p+1)) …" >&2
+    (( p++ ))
+  done
+  echo "$p"
+}
+PORT=$(find_free_port "$PORT")
 
 # ── If container exists, just start it ───────────────────────────────────────
 if docker inspect "$CONTAINER" &>/dev/null; then
