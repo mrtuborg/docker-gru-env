@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { RefreshCw, Activity, Plug, AlertTriangle, CheckCircle2, Loader2 } from 'lucide-react'
 import HealthBadge from '../components/HealthBadge'
 
@@ -24,6 +24,7 @@ export default function Dashboard() {
   const [sessions, setSessions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const location = useLocation()
+  const navigate = useNavigate()
 
   const load = () => {
     setLoading(true)
@@ -74,7 +75,13 @@ export default function Dashboard() {
           </div>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
             {data.connectors.map((p: any) => (
-              <div key={p.id} className="card" style={{ padding:'16px 16px 12px' }}>
+              <div
+                key={p.id}
+                className="card"
+                onClick={() => navigate('/connectors')}
+                style={{ padding:'16px 16px 12px', cursor:'pointer' }}
+                title="Go to Connectors"
+              >
                 <div style={{ fontSize:22, marginBottom:6 }}>
                   {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : p.plugin_type === 'obsidian' ? '🔮' : '📝'}
                 </div>
