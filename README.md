@@ -69,7 +69,47 @@ docker build -f Dockerfile.server -t gru-server:latest . \
 > **Azure** `~/.azure` mount is optional — only needed if you use the Azure connector
 > with `az login` credentials.
 
-### Test container name
+### Helper scripts (recommended)
+
+```bash
+./server-build.sh                          # build gru-server:latest
+./server-run.sh                            # start / restart existing container
+./server-run.sh --fresh                    # wipe volume + restart
+./server-run.sh --fresh --seed <cfg.yml>   # wipe + seed from a config file
+./server-run.sh --seed <cfg.yml>           # seed into existing volume (idempotent)
+```
+
+The `--seed` flag reads a YAML config (e.g. `hil-stress/config.yml`) and inserts the
+connector + pipeline into the database on startup without requiring manual UI steps.
+
+### GitHub Enterprise (GHE) authorization
+
+For connectors pointing at a GitHub Enterprise host (e.g. `sensio.ghe.com`), OAuth requires
+a GitHub App to be registered on that instance first.
+
+**First time (no app registered):**
+
+1. Go to **Connectors → your GHE connector → Authorize**
+2. The dialog detects no app is registered and shows **"Register GitHub App →"**
+3. Click it — the browser redirects to GHE, you confirm, and the app is created automatically
+4. After redirect back, the dialog continues to the device flow (enter a code on GHE)
+
+**Subsequent runs (app already registered, vault wiped by `--fresh`):**
+
+The `client_id` is stored in the encrypted vault inside the data volume. If you wipe the
+volume, you need to either re-register (repeat step 1–4 above) or pass the `client_id`
+via environment variable so it survives restarts:
+
+```bash
+# Get the client_id after first registration (copy from the Connectors page health details)
+# then pass it on future runs to skip re-registration:
+GRU_GITHUB_SENSIO_GHE_COM_CLIENT_ID=<your-client-id> ./server-run.sh --fresh --seed hil-stress/config.yml
+```
+
+The env var name pattern is `GRU_GITHUB_{HOST}_CLIENT_ID` where `HOST` is the hostname
+uppercased with dots and hyphens replaced by underscores.
+
+
 
 During development a separate test container runs on the same port with its own volume:
 
