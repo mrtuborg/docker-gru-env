@@ -103,7 +103,10 @@ class GitHubConnector(GruConnector):
                 login = resp.json().get("login", "?")
                 return ConnectorHealth(HealthStatus.HEALTHY, f"Authenticated as @{login}")
             elif resp.status_code == 401:
-                return ConnectorHealth(HealthStatus.ERROR, "Token expired — re-authorize via browser", {"needs_auth": True})
+                # GitHub App user tokens (ghu_) may be rejected by some GHE versions.
+                # Guide the user to use a classic PAT instead.
+                hint = " Use a classic PAT (repo,project,read:org) via Configure instead." if token.startswith("ghu_") else " Re-authorize or set a classic PAT via Configure."
+                return ConnectorHealth(HealthStatus.ERROR, f"Bad credentials.{hint}", {"needs_auth": True})
             else:
                 return ConnectorHealth(HealthStatus.DEGRADED, f"Unexpected status {resp.status_code}")
         except httpx.ConnectError:

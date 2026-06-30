@@ -1,6 +1,7 @@
 """Boards router — GitHub project boards + Obsidian kanban boards."""
 from __future__ import annotations
 
+import re
 import httpx
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -8,6 +9,20 @@ from pydantic import BaseModel
 from ..vault import load_secret
 
 router = APIRouter()
+
+
+def _parse_board_url(config: dict) -> tuple[str, int]:
+    """Extract (owner, number) from board_url or legacy project_owner/project_number fields."""
+    board_url = config.get("board_url", "")
+    if board_url:
+        # Matches: /orgs/OWNER/projects/NUM  or  /users/OWNER/projects/NUM
+        m = re.search(r"/(?:orgs|users)/([^/]+)/projects/(\d+)", board_url)
+        if m:
+            return m.group(1), int(m.group(2))
+    # Legacy fallback
+    owner = config.get("project_owner", "")
+    number = int(config.get("project_number") or 0)
+    return owner, number
 
 
 class WatcherAction(BaseModel):
@@ -19,14 +34,15 @@ async def list_boards(request: Request):
     pm = request.app.state.connectors
     boards = []
     for plugin in pm.get_by_type("github"):
+        owner, number = _parse_board_url(plugin._config)
         boards.append({
             "id":     f"{plugin.plugin_id}/board",
             "type":   "github",
-            "name":   plugin._config.get("project_name") or f"Board #{plugin._config.get('project_number')}",
+            "name":   plugin._config.get("project_name") or f"Board #{number or 'N/A'}",
             "plugin": plugin.plugin_id,
             "config": {
-                "project_number": plugin._config.get("project_number"),
-                "project_owner":  plugin._config.get("project_owner"),
+                "project_number": number,
+                "project_owner":  owner,
                 "host":           plugin._config.get("host"),
             },
         })
@@ -103,10 +119,9 @@ async def board_columns(board_id: str, request: Request):
         return [{"name": col, "card_count": len(plugin.list_cards(col)), "cards": plugin.list_cards(col)} for col in columns]
 
     if plugin.connector_type == "github":
-        owner = plugin._config.get("project_owner", "")
-        number = plugin._config.get("project_number", 0)
+        owner, number = _parse_board_url(plugin._config)
         if not owner or not number:
-            raise HTTPException(400, "GitHub connector has no project_owner/project_number configured")
+            raise HTTPException(400, "GitHub connector has no board_url configured — edit the connector and add the project board URL")
         return await _gh_board_columns(plugin, owner, number)
 
     raise HTTPException(400, f"Column listing not supported for {plugin.connector_type} boards")
