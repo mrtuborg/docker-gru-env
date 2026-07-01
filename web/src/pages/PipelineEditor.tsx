@@ -284,66 +284,67 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
                     </div>
 
-                    {/* Section 1: agent name + model */}
-                    <div style={{ padding:'7px 10px', borderBottom:'1px solid var(--border)', height:46, flexShrink:0, overflow:'hidden' }}>
+                    {/* Section 1: agent name + model — name + badge on one row, label above */}
+                    <div style={{ padding:'6px 10px 5px', borderBottom:'1px solid var(--border)', height:46, flexShrink:0, overflow:'hidden' }}>
+                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Agent</div>
                       {hasLintErrors ? (
-                        <>
-                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                          <span style={{ fontSize:11, fontWeight:600, color:'var(--text)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                             {ag!.name || ag!.id}
-                          </div>
-                          <div style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>
-                            ⚠ {ag!.lint_errors.length} dep error{ag!.lint_errors.length > 1 ? 's' : ''}
-                          </div>
-                        </>
-                      ) : isHuman ? (
-                        <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:8 }}>
-                          Human gate
+                          </span>
+                          <span style={{ fontSize:9, color:'var(--yellow)', fontWeight:700, flexShrink:0 }}>⚠ {ag!.lint_errors.length}</span>
                         </div>
+                      ) : isHuman ? (
+                        <div style={{ color:'var(--muted)', fontSize:11 }}>Human gate</div>
                       ) : ag ? (
-                        <>
-                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
+                          <span style={{ fontSize:11, fontWeight:600, color:'var(--text)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                             {ag.name || ag.id}
-                          </div>
+                          </span>
                           {ag.model && (
-                            <span style={{
-                              fontSize:9, padding:'1px 5px', borderRadius:3,
-                              background:'color-mix(in srgb, var(--purple) 15%, transparent)',
-                              color:'var(--purple)', fontWeight:600,
-                            }}>{ag.model.split('-').slice(0,2).join('-')}</span>
+                            <span style={{ fontSize:8, padding:'1px 4px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600, flexShrink:0 }}>
+                              {ag.model.split('-').slice(1,2).join('')}
+                            </span>
                           )}
-                        </>
+                        </div>
                       ) : (
-                        <div style={{ fontSize:10, color:'var(--red)', paddingTop:4 }}>No agent assigned</div>
+                        <div style={{ fontSize:10, color:'var(--red)' }}>No agent assigned</div>
                       )}
                     </div>
 
                     {/* Section 2: tools */}
-                    <div style={{ padding:'5px 10px', borderBottom:'1px solid var(--border)', height:42, flexShrink:0, overflow:'hidden', display:'flex', flexWrap:'wrap', gap:3, alignContent:'flex-start' }}>
-                      {tools.length > 0 ? tools.map(t => (
-                        <span key={t} style={{
-                          fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
-                          background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
-                          color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
-                        }}>{t}</span>
-                      )) : (
-                        <span style={{ fontSize:9, color:'var(--muted)', paddingTop:4 }}>—</span>
-                      )}
+                    <div style={{ padding:'4px 10px 3px', borderBottom:'1px solid var(--border)', height:40, flexShrink:0, overflow:'hidden' }}>
+                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Tools</div>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:2 }}>
+                        {tools.length > 0 ? tools.map(t => (
+                          <span key={t} style={{
+                            fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
+                            background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
+                            color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
+                          }}>{t}</span>
+                        )) : (
+                          <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Section 3: skills */}
-                    <div style={{ padding:'5px 10px', flex:1, overflow:'hidden', display:'flex', flexWrap:'wrap', gap:3, alignContent:'flex-start' }}>
-                      {ag && ag.skills.length > 0 ? ag.skills.slice(0, 4).map((sk: string) => {
-                        const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
-                        return (
-                          <span key={sk} title={sk} style={{
-                            fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
-                            background:'color-mix(in srgb, var(--green) 12%, transparent)',
-                            color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
-                          }}>{label}</span>
-                        )
-                      }) : (
-                        <span style={{ fontSize:9, color:'var(--muted)', paddingTop:4 }}>—</span>
-                      )}
+                    <div style={{ padding:'4px 10px 3px', flex:1, overflow:'hidden' }}>
+                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Skills</div>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:2 }}>
+                        {ag && ag.skills.length > 0 ? ag.skills.slice(0, 4).map((sk: string) => {
+                          const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                          return (
+                            <span key={sk} title={sk} style={{
+                              fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
+                              background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                              color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                            }}>{label}</span>
+                          )
+                        }) : (
+                          <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
