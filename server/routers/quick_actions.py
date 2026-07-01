@@ -290,6 +290,36 @@ async def generate_issue(body: GenerateRequest, request: Request):
     return {"body": generated}
 
 
+def _humanize_skill_error(raw: str) -> str:
+    """Extract a concise, human-readable message from raw skill script stderr."""
+    if not raw:
+        return "Skill script failed with no output."
+
+    lines = [l.strip() for l in raw.splitlines() if l.strip()]
+
+    # Prefer lines that start with our own ❌ marker
+    for line in lines:
+        if line.startswith("❌"):
+            return line
+
+    # Strip gh CLI "Usage:" section — keep only lines before it
+    trimmed = []
+    for line in lines:
+        if line.startswith("Usage:") or line.startswith("Flags:"):
+            break
+        trimmed.append(line)
+
+    if trimmed:
+        # Return first meaningful error line (skip "Creating..." progress lines)
+        for line in trimmed:
+            if not any(line.startswith(p) for p in ("Creating", "→", "  →", "ℹ")):
+                return line
+        return trimmed[-1]
+
+    # Fallback: first line only
+    return lines[0] if lines else "Skill script failed."
+
+
 # ── Publish ───────────────────────────────────────────────────────────────────
 
 @router.post("/publish")
@@ -341,8 +371,9 @@ async def publish_issue(body: PublishRequest):
                 if proc.returncode == 0:
                     return {"message": stdout.decode().strip(), "source": "skill"}
                 else:
-                    err = stderr.decode().strip()
-                    raise HTTPException(500, f"Skill create.sh failed: {err}")
+                    raw_err = stderr.decode().strip()
+                    human_err = _humanize_skill_error(raw_err)
+                    raise HTTPException(500, human_err)
             except asyncio.TimeoutError:
                 raise HTTPException(504, f"Skill create.sh timed out after 120s")
 
