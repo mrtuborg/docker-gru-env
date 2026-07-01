@@ -225,7 +225,6 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
             {pipeline.stages.map((stage, i) => {
               const ag = stage.agent_id ? agentMap[stage.agent_id] : null
               const isHuman = stage.actor === 'human'
-              const hasPrompt = !!(stage.prompt || stage.task_prompt)
               const tools = ag ? ag.tools : []
               const hasLintErrors = ag && ag.lint_errors.length > 0
 
@@ -236,7 +235,7 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                     onClick={() => onEditStage(i)}
                     title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
                     style={{
-                      width: 148, borderRadius:8,
+                      width: 152, height: 168, borderRadius:8,
                       border: hasLintErrors
                         ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
                         : '1px solid var(--border)',
@@ -245,9 +244,10 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                         : isHuman
                           ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
                           : 'var(--surface)',
-                      cursor:'pointer', overflow:'hidden',
+                      cursor:'pointer', overflow:'hidden', flexShrink:0,
+                      display:'flex', flexDirection:'column',
                       transition:'border-color 0.15s, box-shadow 0.15s',
-                      opacity: hasLintErrors ? 0.75 : 1,
+                      opacity: hasLintErrors ? 0.8 : 1,
                     }}
                     onMouseEnter={e => {
                       ;(e.currentTarget as HTMLDivElement).style.borderColor = hasLintErrors ? 'var(--yellow)' : 'var(--accent)'
@@ -260,8 +260,8 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                   >
                     {/* Header: column name + actor icon */}
                     <div style={{
-                      padding:'8px 10px', display:'flex', alignItems:'center', gap:6,
-                      borderBottom:'1px solid var(--border)',
+                      padding:'7px 10px', display:'flex', alignItems:'center', gap:6,
+                      borderBottom:'1px solid var(--border)', flexShrink:0,
                       background: hasLintErrors
                         ? 'color-mix(in srgb, var(--yellow) 10%, transparent)'
                         : isHuman
@@ -269,14 +269,14 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                           : 'color-mix(in srgb, var(--accent) 8%, transparent)',
                     }}>
                       <div style={{
-                        width:22, height:22, borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center',
+                        width:20, height:20, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
                         background: hasLintErrors
                           ? 'color-mix(in srgb, var(--yellow) 25%, transparent)'
                           : isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
                         color: hasLintErrors ? 'var(--yellow)' : isHuman ? 'var(--muted)' : 'var(--accent)',
                         flexShrink:0,
                       }}>
-                        {hasLintErrors ? <AlertTriangle size={12}/> : isHuman ? <User size={12}/> : <Bot size={12}/>}
+                        {hasLintErrors ? <AlertTriangle size={11}/> : isHuman ? <User size={11}/> : <Bot size={11}/>}
                       </div>
                       <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                         {stage.column || '(unnamed)'}
@@ -284,24 +284,24 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
                     </div>
 
-                    {/* Body: agent + model, or lint errors */}
-                    <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', minHeight:36 }}>
+                    {/* Section 1: agent name + model */}
+                    <div style={{ padding:'7px 10px', borderBottom:'1px solid var(--border)', height:46, flexShrink:0, overflow:'hidden' }}>
                       {hasLintErrors ? (
-                        <div>
-                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <>
+                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:2, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                             {ag!.name || ag!.id}
                           </div>
                           <div style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>
-                            ⚠ {ag!.lint_errors.length} dependency error{ag!.lint_errors.length > 1 ? 's' : ''}
+                            ⚠ {ag!.lint_errors.length} dep error{ag!.lint_errors.length > 1 ? 's' : ''}
                           </div>
-                        </div>
+                        </>
                       ) : isHuman ? (
-                        <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:6 }}>
+                        <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:8 }}>
                           Human gate
                         </div>
                       ) : ag ? (
                         <>
-                          <div style={{ fontSize:12, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                             {ag.name || ag.id}
                           </div>
                           {ag.model && (
@@ -313,43 +313,37 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                           )}
                         </>
                       ) : (
-                        <div style={{ color:'var(--muted)', fontSize:11 }}>
-                          {!hasPrompt && <span style={{ color:'var(--red)', fontSize:11 }}>No agent / prompt</span>}
-                        </div>
+                        <div style={{ fontSize:10, color:'var(--red)', paddingTop:4 }}>No agent assigned</div>
                       )}
                     </div>
 
-                    {/* Footer: tool chips + skill chips */}
-                    <div style={{ padding:'6px 10px', minHeight:36, display:'flex', flexWrap:'wrap', gap:3 }}>
-                      {tools.length > 0 && tools.map(t => (
+                    {/* Section 2: tools */}
+                    <div style={{ padding:'5px 10px', borderBottom:'1px solid var(--border)', height:42, flexShrink:0, overflow:'hidden', display:'flex', flexWrap:'wrap', gap:3, alignContent:'flex-start' }}>
+                      {tools.length > 0 ? tools.map(t => (
                         <span key={t} style={{
-                          fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
+                          fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
                           background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
                           color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
                         }}>{t}</span>
-                      ))}
-                      {ag && ag.skills.length > 0 && ag.skills.slice(0, 3).map((sk: string) => {
+                      )) : (
+                        <span style={{ fontSize:9, color:'var(--muted)', paddingTop:4 }}>—</span>
+                      )}
+                    </div>
+
+                    {/* Section 3: skills */}
+                    <div style={{ padding:'5px 10px', flex:1, overflow:'hidden', display:'flex', flexWrap:'wrap', gap:3, alignContent:'flex-start' }}>
+                      {ag && ag.skills.length > 0 ? ag.skills.slice(0, 4).map((sk: string) => {
                         const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
                         return (
                           <span key={sk} title={sk} style={{
-                            fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
+                            fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
                             background:'color-mix(in srgb, var(--green) 12%, transparent)',
                             color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
                           }}>{label}</span>
                         )
-                      })}
-                      {!ag && hasPrompt && (() => {
-                          const lines = stage.prompt.split('\n')
-                          const steps = lines.filter((l: string) => /^#{1,3}\s+Step\s+\d/i.test(l)).length
-                          return steps > 0 ? (
-                            <span style={{
-                              fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
-                              background:'color-mix(in srgb, var(--accent) 14%, transparent)',
-                              color:'var(--accent)',
-                            }}>{steps} steps</span>
-                          ) : null
-                        })()
-                      }
+                      }) : (
+                        <span style={{ fontSize:9, color:'var(--muted)', paddingTop:4 }}>—</span>
+                      )}
                     </div>
                   </div>
 
