@@ -9,6 +9,7 @@ interface Agent {
   agent_md: string
   model: string
   tools: string[]
+  skills: string[]
   mcp_servers: Record<string, unknown>
   file_path: string
   repo_url: string
@@ -26,7 +27,7 @@ interface Pipeline {
 
 const EMPTY_AGENT: Partial<Agent> = {
   id: '', name: '', description: '', source: 'inline',
-  agent_md: '', model: '', tools: [], mcp_servers: {},
+  agent_md: '', model: '', tools: [], skills: [], mcp_servers: {},
 }
 
 export default function Agents() {
@@ -299,6 +300,27 @@ export default function Agents() {
                     {(editing?.tools || []).map(t => (
                       <span key={t} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--cyan) 14%, transparent)', color: 'var(--cyan)', fontWeight: 600 }}>{t}</span>
                     ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}>
+                    🔧 Skills (one per line, relative to working_dir)
+                  </label>
+                  <textarea className="input" rows={4} style={{ width: '100%', fontSize: 12, fontFamily: 'ui-monospace, monospace', resize: 'vertical' }}
+                    value={(editing?.skills || []).join('\n')}
+                    onChange={e => field('skills', e.target.value.split('\n').map(s => s.trim()).filter(Boolean) as unknown as string[])}
+                    placeholder={'skills/hil-stress/hil-preflight.sh\nskills/hil-stress/hil-needs-human.sh'} />
+                  <p style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                    Declared skill dependencies. The orchestrator will warn if any are missing before starting a session.
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                    {(editing?.skills || []).map((sk: string) => {
+                      const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                      return (
+                        <span key={sk} title={sk} style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--green) 12%, transparent)', color: 'var(--green)', fontWeight: 600 }}>{label}</span>
+                      )
+                    })}
                   </div>
                 </div>
 

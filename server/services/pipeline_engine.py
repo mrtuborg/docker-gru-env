@@ -334,6 +334,21 @@ class PipelineEngine:
             else:
                 prompt = self._render_prompt(stage_cfg, issue, pipeline)
 
+            # Pre-check declared skill dependencies
+            if agent_data and agent_data.get("skills"):
+                working_dir = pipeline.get("working_dir", "") or ""
+                missing = []
+                for skill_path in agent_data["skills"]:
+                    full = Path(working_dir) / skill_path if working_dir else Path(skill_path)
+                    if not full.exists():
+                        missing.append(skill_path)
+                if missing:
+                    self._emit(pid, "warning",
+                        f"⚠ #{issue.number}: agent '{agent_id}' requires missing skills: {', '.join(missing)}. "
+                        f"Ensure working_dir is set and the skills/ directory is mounted.",
+                        issue=issue.number, stage=issue.stage,
+                    )
+
             # Write agent file if using custom agent
             if agent_data:
                 self._write_agent_file(agent_data)

@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS agents (
     repo_ref        TEXT DEFAULT 'main',
     model           TEXT DEFAULT '',
     tools_json      TEXT DEFAULT '[]',
+    skills_json     TEXT DEFAULT '[]',
     mcp_servers_json TEXT DEFAULT '{}',
     created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
@@ -178,6 +179,7 @@ async def init_db() -> None:
         # Migrations: safe to run repeatedly; ignore if column already exists
         migrations = [
             "ALTER TABLE pipelines ADD COLUMN working_dir TEXT",
+            "ALTER TABLE agents ADD COLUMN skills_json TEXT DEFAULT '[]'",
         ]
         for stmt in migrations:
             try:
@@ -222,6 +224,7 @@ async def list_agents() -> list[dict]:
             for r in rows:
                 d = dict(r)
                 d["tools"] = json.loads(d.pop("tools_json", "[]"))
+                d["skills"] = json.loads(d.pop("skills_json", "[]"))
                 d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
                 result.append(d)
             return result
@@ -236,6 +239,7 @@ async def get_agent(agent_id: str) -> dict | None:
                 return None
             d = dict(row)
             d["tools"] = json.loads(d.pop("tools_json", "[]"))
+            d["skills"] = json.loads(d.pop("skills_json", "[]"))
             d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
             return d
 
@@ -245,14 +249,15 @@ async def upsert_agent(data: dict) -> None:
         await db.execute(
             """INSERT INTO agents(id, name, description, source, agent_md,
                    file_path, repo_url, repo_path, repo_ref,
-                   model, tools_json, mcp_servers_json, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   model, tools_json, skills_json, mcp_servers_json, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, description=excluded.description,
                    source=excluded.source, agent_md=excluded.agent_md,
                    file_path=excluded.file_path, repo_url=excluded.repo_url,
                    repo_path=excluded.repo_path, repo_ref=excluded.repo_ref,
                    model=excluded.model, tools_json=excluded.tools_json,
+                   skills_json=excluded.skills_json,
                    mcp_servers_json=excluded.mcp_servers_json,
                    updated_at=excluded.updated_at""",
             (
@@ -262,6 +267,7 @@ async def upsert_agent(data: dict) -> None:
                 data.get("repo_path", ""), data.get("repo_ref", "main"),
                 data.get("model", ""),
                 json.dumps(data.get("tools", [])),
+                json.dumps(data.get("skills", [])),
                 json.dumps(data.get("mcp_servers", {})),
             ),
         )

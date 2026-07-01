@@ -47,6 +47,7 @@ def parse_agent_md(content: str) -> dict:
         "description": frontmatter.get("description", ""),
         "model": frontmatter.get("model", ""),
         "tools": frontmatter.get("tools", []),
+        "skills": frontmatter.get("skills", []),
         "mcp_servers": frontmatter.get("mcp-servers", frontmatter.get("mcp_servers", {})),
         "body": body,
         "frontmatter": frontmatter,
@@ -64,6 +65,8 @@ def build_agent_md(data: dict) -> str:
         fm["model"] = data["model"]
     if data.get("tools"):
         fm["tools"] = data["tools"]
+    if data.get("skills"):
+        fm["skills"] = data["skills"]
     if data.get("mcp_servers"):
         fm["mcp-servers"] = data["mcp_servers"]
 
@@ -93,6 +96,7 @@ class AgentCreate(BaseModel):
     repo_ref: str = "main"
     model: str = ""
     tools: list = []
+    skills: list = []
     mcp_servers: dict = {}
 
 
@@ -102,6 +106,7 @@ class AgentUpdate(BaseModel):
     agent_md: Optional[str] = None
     model: Optional[str] = None
     tools: Optional[list] = None
+    skills: Optional[list] = None
     mcp_servers: Optional[dict] = None
 
 
@@ -171,6 +176,7 @@ async def update(agent_id: str, body: AgentUpdate):
         parsed = parse_agent_md(merged["agent_md"])
         merged["model"] = parsed.get("model", merged.get("model", ""))
         merged["tools"] = parsed.get("tools", merged.get("tools", []))
+        merged["skills"] = parsed.get("skills", merged.get("skills", []))
         merged["mcp_servers"] = parsed.get("mcp_servers", merged.get("mcp_servers", {}))
 
     await upsert_agent(merged)

@@ -24,6 +24,7 @@ interface AgentInfo {
   description: string
   model: string
   tools: string[]
+  skills: string[]
 }
 
 interface ModelConfig {
@@ -282,40 +283,37 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       )}
                     </div>
 
-                    {/* Footer: tool chips */}
+                    {/* Footer: tool chips + skill chips */}
                     <div style={{ padding:'6px 10px', minHeight:36, display:'flex', flexWrap:'wrap', gap:3 }}>
-                      {tools.length > 0 ? tools.map(t => (
+                      {tools.length > 0 && tools.map(t => (
                         <span key={t} style={{
                           fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
                           background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
                           color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
                         }}>{t}</span>
-                      )                      ) : hasPrompt ? (() => {
+                      ))}
+                      {ag && ag.skills.length > 0 && ag.skills.slice(0, 3).map((sk: string) => {
+                        const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                        return (
+                          <span key={sk} title={sk} style={{
+                            fontSize:9, padding:'2px 5px', borderRadius:3, fontWeight:600,
+                            background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                            color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                          }}>{label}</span>
+                        )
+                      })}
+                      {!ag && hasPrompt && (() => {
                           const lines = stage.prompt.split('\n')
                           const steps = lines.filter((l: string) => /^#{1,3}\s+Step\s+\d/i.test(l)).length
-                          const skills = [...new Set(
-                            (stage.prompt.match(/bash\s+(skills\/[\w/-]+\.sh)/g) || [])
-                              .map((m: string) => m.replace(/^bash\s+skills\/[\w-]+\//, '').replace('.sh', ''))
-                          )] as string[]
-                          return (
-                            <div style={{ display:'flex', gap:4, alignItems:'center', flexWrap:'wrap' }}>
-                              {steps > 0 && (
-                                <span style={{
-                                  fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
-                                  background:'color-mix(in srgb, var(--accent) 14%, transparent)',
-                                  color:'var(--accent)',
-                                }}>{steps} steps</span>
-                              )}
-                              {skills.slice(0, 2).map((sk: string) => (
-                                <span key={sk} style={{
-                                  fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
-                                  background:'color-mix(in srgb, var(--green) 12%, transparent)',
-                                  color:'var(--green)',
-                                }}>{sk}</span>
-                              ))}
-                            </div>
-                          )
-                        })() : null}
+                          return steps > 0 ? (
+                            <span style={{
+                              fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                              background:'color-mix(in srgb, var(--accent) 14%, transparent)',
+                              color:'var(--accent)',
+                            }}>{steps} steps</span>
+                          ) : null
+                        })()
+                      }
                     </div>
                   </div>
 
