@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from .config import init_db
 from .connector_manager import ConnectorManager
 from .services.pipeline_engine import PipelineEngine
-from .routers import dashboard, connectors_api, wizard, boards, sessions, settings_api, pipelines, agents, auth, skills
+from .routers import dashboard, connectors_api, wizard, boards, sessions, settings_api, pipelines, agents, auth, skills, quick_actions, environment
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +69,8 @@ def create_app(data_dir: Path | None = None) -> FastAPI:
     app.include_router(pipelines.router,   prefix="/api/pipelines", tags=["pipelines"])
     app.include_router(agents.router,      prefix="/api/agents",    tags=["agents"])
     app.include_router(skills.router,      prefix="/api/skills",    tags=["skills"])
+    app.include_router(quick_actions.router, prefix="/api/quick-actions", tags=["quick-actions"])
+    app.include_router(environment.router,  prefix="/api/env",           tags=["environment"])
     app.include_router(auth.router,        prefix="/api/auth",      tags=["auth"])
 
     # Serve built React SPA from static/ — only in production

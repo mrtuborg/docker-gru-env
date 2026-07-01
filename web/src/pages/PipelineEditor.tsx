@@ -25,6 +25,7 @@ interface AgentInfo {
   model: string
   tools: string[]
   skills: string[]
+  is_orchestrator: boolean
   lint_errors: string[]
 }
 
@@ -56,6 +57,7 @@ interface PipelineData {
   models: ModelConfig[]
   allowed_repos: string[]
   findings: FindingsBoard | null
+  orchestrator_agent_id: string
 }
 
 interface PipelineSummary {
@@ -215,6 +217,53 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
 
+      {/* ── Orchestrator ── */}
+      {(() => {
+        const orchAgents = agents.filter(a => a.is_orchestrator)
+        const assigned = pipeline.orchestrator_agent_id ? agentMap[pipeline.orchestrator_agent_id] : null
+        return (
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase' }}>
+              Orchestrator
+            </div>
+            <div style={{
+              display:'flex', alignItems:'center', gap:12,
+              padding:'12px 16px', borderRadius:8, border:'1px solid var(--border)',
+              background: assigned ? 'color-mix(in srgb, var(--purple) 6%, var(--surface))' : 'var(--surface2)',
+              borderColor: assigned ? 'color-mix(in srgb, var(--purple) 35%, transparent)' : 'var(--border)',
+            }}>
+              <div style={{
+                width:32, height:32, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center',
+                background: assigned ? 'color-mix(in srgb, var(--purple) 18%, transparent)' : 'var(--surface)',
+                color: assigned ? 'var(--purple)' : 'var(--muted)', flexShrink:0,
+              }}>
+                <Bot size={16}/>
+              </div>
+              {assigned ? (
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{assigned.name}</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{assigned.model || 'no model set'}</div>
+                </div>
+              ) : (
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>No orchestrator assigned</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+                    {orchAgents.length === 0
+                      ? 'Mark an agent as Orchestrator in the Agents page first'
+                      : `${orchAgents.length} orchestrator agent${orchAgents.length > 1 ? 's' : ''} available — assign via Edit mode`}
+                  </div>
+                </div>
+              )}
+              {assigned && (
+                <span style={{ fontSize:10, padding:'2px 8px', borderRadius:4, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:700 }}>
+                  ORCHESTRATOR
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
       {/* ── Stage Flow ── */}
       <div>
         <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase' }}>
@@ -235,7 +284,7 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                     onClick={() => onEditStage(i)}
                     title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
                     style={{
-                      width: 152, height: 168, borderRadius:8,
+                      width: 152, borderRadius:8,
                       border: hasLintErrors
                         ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
                         : '1px solid var(--border)',
@@ -284,41 +333,40 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
                     </div>
 
-                    {/* Section 1: agent name + model — name + badge on one row, label above */}
-                    <div style={{ padding:'6px 10px 5px', borderBottom:'1px solid var(--border)', height:46, flexShrink:0, overflow:'hidden' }}>
-                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Agent</div>
+                    {/* Section 1: agent name + model */}
+                    <div style={{ padding:'8px 10px 7px', borderBottom:'1px solid var(--border)' }}>
                       {hasLintErrors ? (
-                        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                          <span style={{ fontSize:11, fontWeight:600, color:'var(--text)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <>
+                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
                             {ag!.name || ag!.id}
-                          </span>
-                          <span style={{ fontSize:9, color:'var(--yellow)', fontWeight:700, flexShrink:0 }}>⚠ {ag!.lint_errors.length}</span>
-                        </div>
+                          </div>
+                          <span style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>⚠ {ag!.lint_errors.length} dep {ag!.lint_errors.length === 1 ? 'error' : 'errors'}</span>
+                        </>
                       ) : isHuman ? (
-                        <div style={{ color:'var(--muted)', fontSize:11 }}>Human gate</div>
+                        <div style={{ color:'var(--muted)', fontSize:11, paddingTop:6 }}>Human gate</div>
                       ) : ag ? (
-                        <div style={{ display:'flex', alignItems:'center', gap:5 }}>
-                          <span style={{ fontSize:11, fontWeight:600, color:'var(--text)', flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        <>
+                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
                             {ag.name || ag.id}
-                          </span>
+                          </div>
                           {ag.model && (
-                            <span style={{ fontSize:8, padding:'1px 4px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600, flexShrink:0 }}>
-                              {ag.model.split('-').slice(1,2).join('')}
+                            <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600 }}>
+                              {ag.model}
                             </span>
                           )}
-                        </div>
+                        </>
                       ) : (
-                        <div style={{ fontSize:10, color:'var(--red)' }}>No agent assigned</div>
+                        <div style={{ fontSize:10, color:'var(--red)', paddingTop:6 }}>No agent assigned</div>
                       )}
                     </div>
 
                     {/* Section 2: tools */}
-                    <div style={{ padding:'4px 10px 3px', borderBottom:'1px solid var(--border)', height:40, flexShrink:0, overflow:'hidden' }}>
-                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Tools</div>
-                      <div style={{ display:'flex', flexWrap:'wrap', gap:2 }}>
+                    {/* Section 2: tools */}
+                    <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)' }}>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
                         {tools.length > 0 ? tools.map(t => (
                           <span key={t} style={{
-                            fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
+                            fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
                             background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
                             color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
                           }}>{t}</span>
@@ -329,14 +377,13 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                     </div>
 
                     {/* Section 3: skills */}
-                    <div style={{ padding:'4px 10px 3px', flex:1, overflow:'hidden' }}>
-                      <div style={{ fontSize:8, fontWeight:700, letterSpacing:'0.06em', color:'var(--muted)', textTransform:'uppercase', marginBottom:3 }}>Skills</div>
-                      <div style={{ display:'flex', flexWrap:'wrap', gap:2 }}>
-                        {ag && ag.skills.length > 0 ? ag.skills.slice(0, 4).map((sk: string) => {
+                    <div style={{ padding:'8px 10px' }}>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
+                        {ag && ag.skills.length > 0 ? ag.skills.map((sk: string) => {
                           const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
                           return (
                             <span key={sk} title={sk} style={{
-                              fontSize:8, padding:'1px 4px', borderRadius:3, fontWeight:600,
+                              fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
                               background:'color-mix(in srgb, var(--green) 12%, transparent)',
                               color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
                             }}>{label}</span>
@@ -646,6 +693,7 @@ export default function PipelineEditor() {
         project_owner: '', project_number: 0, board_path: null,
         stages: [], poll_interval: 300, max_issues: 50, max_retries: 3,
         session_timeout_hours: 4, models: [], allowed_repos: [], findings: null,
+        orchestrator_agent_id: '',
       })
     } else {
       fetch(`/api/pipelines/${id}`).then(r => r.json()).then(data => {
@@ -1095,6 +1143,25 @@ export default function PipelineEditor() {
                 onChange={e => update({ session_timeout_hours: parseFloat(e.target.value) || 4 })}/>
             </div>
           </div>
+
+          {/* Orchestrator */}
+          <div className="section-label" style={{ marginTop:16 }}>Orchestrator Agent</div>
+          {(() => {
+            const orchAgents = agents.filter(a => a.is_orchestrator)
+            return (
+              <select className="form-input" style={{ width:'100%', marginBottom:8 }}
+                value={pipeline.orchestrator_agent_id || ''}
+                onChange={e => update({ orchestrator_agent_id: e.target.value })}>
+                <option value="">— None —</option>
+                {orchAgents.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+                {orchAgents.length === 0 && (
+                  <option disabled value="">No orchestrator agents yet — mark one in the Agents page</option>
+                )}
+              </select>
+            )
+          })()}
 
           {/* Models */}
           <div className="section-label" style={{ marginTop:16 }}>Models</div>

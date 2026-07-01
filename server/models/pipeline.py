@@ -66,3 +66,4 @@ class PipelineUpdate(BaseModel):
     allowed_repos: Optional[List[str]] = None
     findings: Optional[FindingsBoard] = None
     working_dir: Optional[str] = None
+    orchestrator_agent_id: Optional[str] = None

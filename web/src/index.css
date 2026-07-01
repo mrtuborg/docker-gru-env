@@ -92,3 +92,5 @@ code{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;font-size:.85em;}
 .modal-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:50;}
 .modal-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:32px;max-width:520px;width:100%;margin:16px;}
 .oauth-code{font-family:ui-monospace,"SFMono-Regular",Menlo,monospace;font-size:28px;font-weight:700;letter-spacing:.15em;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px 24px;text-align:center;color:var(--text);user-select:all;}
+
+.table-row-hover:hover{background:color-mix(in srgb,var(--accent) 5%,transparent);cursor:pointer;}

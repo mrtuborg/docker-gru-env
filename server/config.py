@@ -78,6 +78,7 @@ CREATE TABLE IF NOT EXISTS agents (
     tools_json      TEXT DEFAULT '[]',
     skills_json     TEXT DEFAULT '[]',
     mcp_servers_json TEXT DEFAULT '{}',
+    is_orchestrator  INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -101,6 +102,7 @@ CREATE TABLE IF NOT EXISTS pipelines (
     allowed_repos_json    TEXT DEFAULT '[]',
     findings_json         TEXT,
     working_dir           TEXT,
+    orchestrator_agent_id TEXT DEFAULT '',
     created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -160,6 +162,16 @@ CREATE TABLE IF NOT EXISTS pipeline_state (
     PRIMARY KEY (pipeline_id, issue_key),
     FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS quick_actions (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    action_type TEXT NOT NULL DEFAULT 'create_issue',
+    pipeline_id TEXT NOT NULL DEFAULT '',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -180,6 +192,8 @@ async def init_db() -> None:
         migrations = [
             "ALTER TABLE pipelines ADD COLUMN working_dir TEXT",
             "ALTER TABLE agents ADD COLUMN skills_json TEXT DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE pipelines ADD COLUMN orchestrator_agent_id TEXT DEFAULT ''",
         ]
         for stmt in migrations:
             try:
@@ -239,6 +253,7 @@ async def list_agents() -> list[dict]:
                 d["tools"] = json.loads(d.pop("tools_json", "[]"))
                 d["skills"] = json.loads(d.pop("skills_json", "[]"))
                 d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+                d["is_orchestrator"] = bool(d.get("is_orchestrator", 0))
                 d["lint_errors"] = _agent_lint(d)
                 result.append(d)
             return result
@@ -255,6 +270,7 @@ async def get_agent(agent_id: str) -> dict | None:
             d["tools"] = json.loads(d.pop("tools_json", "[]"))
             d["skills"] = json.loads(d.pop("skills_json", "[]"))
             d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+            d["is_orchestrator"] = bool(d.get("is_orchestrator", 0))
             d["lint_errors"] = _agent_lint(d)
             return d
 
@@ -264,8 +280,8 @@ async def upsert_agent(data: dict) -> None:
         await db.execute(
             """INSERT INTO agents(id, name, description, source, agent_md,
                    file_path, repo_url, repo_path, repo_ref,
-                   model, tools_json, skills_json, mcp_servers_json, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   model, tools_json, skills_json, mcp_servers_json, is_orchestrator, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, description=excluded.description,
                    source=excluded.source, agent_md=excluded.agent_md,
@@ -274,6 +290,7 @@ async def upsert_agent(data: dict) -> None:
                    model=excluded.model, tools_json=excluded.tools_json,
                    skills_json=excluded.skills_json,
                    mcp_servers_json=excluded.mcp_servers_json,
+                   is_orchestrator=excluded.is_orchestrator,
                    updated_at=excluded.updated_at""",
             (
                 data["id"], data["name"], data.get("description", ""),
@@ -284,6 +301,7 @@ async def upsert_agent(data: dict) -> None:
                 json.dumps(data.get("tools", [])),
                 json.dumps(data.get("skills", [])),
                 json.dumps(data.get("mcp_servers", {})),
+                int(bool(data.get("is_orchestrator", False))),
             ),
         )
         await db.commit()
@@ -447,8 +465,9 @@ async def upsert_pipeline(data: dict) -> None:
             """INSERT INTO pipelines(id, name, enabled, plugin_id, board_type,
                    project_owner, project_number, board_path,
                    poll_interval, max_issues, max_retries, session_timeout_hours,
-                   models_json, allowed_repos_json, findings_json, working_dir, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   models_json, allowed_repos_json, findings_json, working_dir,
+                   orchestrator_agent_id, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, enabled=excluded.enabled,
                    plugin_id=excluded.plugin_id, board_type=excluded.board_type,
@@ -458,6 +477,7 @@ async def upsert_pipeline(data: dict) -> None:
                    session_timeout_hours=excluded.session_timeout_hours,
                    models_json=excluded.models_json, allowed_repos_json=excluded.allowed_repos_json,
                    findings_json=excluded.findings_json, working_dir=excluded.working_dir,
+                   orchestrator_agent_id=excluded.orchestrator_agent_id,
                    updated_at=excluded.updated_at""",
             (
                 pid, data["name"], int(data.get("enabled", True)),
@@ -470,6 +490,7 @@ async def upsert_pipeline(data: dict) -> None:
                 json.dumps(data.get("allowed_repos", [])),
                 json.dumps(data["findings"]) if data.get("findings") else None,
                 data.get("working_dir"),
+                data.get("orchestrator_agent_id", ""),
             ),
         )
         # Replace stages

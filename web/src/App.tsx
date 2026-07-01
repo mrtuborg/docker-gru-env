@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot, Wrench } from 'lucide-react'
+import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot, Wrench, Globe } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Connectors from './pages/Connectors'
 import Boards from './pages/Boards'
@@ -12,6 +12,7 @@ import Agents from './pages/Agents'
 import Skills from './pages/Skills'
 import SessionsPage from './pages/Sessions'
 import SettingsPage from './pages/Settings'
+import Environment from './pages/Environment'
 import Wizard from './pages/Wizard'
 import AuthCallback from './pages/AuthCallback'
 
@@ -132,6 +133,7 @@ function AppShell() {
             <NavLink to="/agents"    onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Bot size={16}/>Agents</NavLink>
             <NavLink to="/skills"    onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Wrench size={16}/>Skills</NavLink>
             <NavLink to="/sessions"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
+            <NavLink to="/environment" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Globe size={16}/>Environment</NavLink>
           </nav>
           {/* Bottom */}
           <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border)' }}>
@@ -152,6 +154,7 @@ function AppShell() {
             <Route path="/agents"        element={<Agents />} />
             <Route path="/skills"        element={<Skills />} />
             <Route path="/sessions"      element={<SessionsPage />} />
+            <Route path="/environment"   element={<Environment />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/wizard"   element={<Wizard onComplete={() => { setNeedsSetup(false); navigate('/') }} />} />
             <Route path="/auth-callback" element={<AuthCallback />} />

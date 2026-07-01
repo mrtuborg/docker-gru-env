@@ -10,6 +10,8 @@ interface Agent {
   model: string
   tools: string[]
   skills: string[]
+  is_orchestrator: boolean
+  lint_errors: string[]
   mcp_servers: Record<string, unknown>
   file_path: string
   repo_url: string
@@ -27,7 +29,7 @@ interface Pipeline {
 
 const EMPTY_AGENT: Partial<Agent> = {
   id: '', name: '', description: '', source: 'inline',
-  agent_md: '', model: '', tools: [], skills: [], mcp_servers: {},
+  agent_md: '', model: '', tools: [], skills: [], is_orchestrator: false, mcp_servers: {},
 }
 
 export default function Agents() {
@@ -40,8 +42,7 @@ export default function Agents() {
   const [saving, setSaving]       = useState(false)
   const [loading, setLoading]     = useState(true)
   const [error, setError]         = useState('')
-  const [importMode, setImportMode] = useState<'file' | 'repo' | 'upload' | null>(null)
-  const [importPath, setImportPath] = useState('')
+  const [importMode, setImportMode] = useState<'repo' | null>(null)
   const [importRepo, setImportRepo] = useState({ url: '', path: '.github/agents', ref: 'main' })
   const uploadRef = useRef<HTMLInputElement>(null)
 
@@ -117,15 +118,6 @@ export default function Agents() {
     fetchAll()
   }
 
-  async function importFromFile() {
-    const r = await fetch('/api/agents/import/file', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ file_path: importPath }),
-    })
-    if (!r.ok) { const e = await r.json(); setError(e.detail || 'Import failed'); return }
-    setImportMode(null); setImportPath(''); fetchAll()
-  }
-
   async function importFromRepo() {
     const r = await fetch('/api/agents/import/repo', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -162,11 +154,8 @@ export default function Agents() {
       <div style={{ padding: '20px 24px 16px', display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <Bot size={18} style={{ color: 'var(--accent)' }} />
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0, flex: 1 }}>Agent Library</h1>
-        <button className="btn btn-ghost" style={{ fontSize: 12, gap: 5 }} onClick={() => setImportMode(m => m === 'file' ? null : 'file')}>
-          <FileUp size={13} /> From file
-        </button>
         <button className="btn btn-ghost" style={{ fontSize: 12, gap: 5 }} onClick={() => uploadRef.current?.click()}>
-          <Upload size={13} /> Upload .agent.md
+          <FileUp size={13} /> From file
         </button>
         <input ref={uploadRef} type="file" accept=".md" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) importFromUpload(f); e.target.value = '' }} />
@@ -179,14 +168,6 @@ export default function Agents() {
       </div>
 
       {/* Import panels */}
-      {importMode === 'file' && (
-        <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, background: 'var(--surface)' }}>
-          <input className="input" style={{ flex: 1, fontSize: 12 }} placeholder="Path to .agent.md on server (e.g. /workspace/.github/agents/hw-check.agent.md)"
-            value={importPath} onChange={e => setImportPath(e.target.value)} onKeyDown={e => e.key === 'Enter' && importFromFile()} autoFocus />
-          <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={importFromFile} disabled={!importPath}>Import</button>
-          <button className="btn btn-ghost" style={{ fontSize: 12 }} onClick={() => setImportMode(null)}>Cancel</button>
-        </div>
-      )}
       {importMode === 'repo' && (
         <div style={{ padding: '10px 24px', borderBottom: '1px solid var(--border)', display: 'flex', gap: 8, flexWrap: 'wrap', background: 'var(--surface)' }}>
           <input className="input" style={{ flex: 2, minWidth: 200, fontSize: 12 }} placeholder="Repository URL"
@@ -288,6 +269,17 @@ export default function Agents() {
                   <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted)', display: 'block', marginBottom: 4 }}><Cpu size={11} style={{ verticalAlign: 'middle' }} /> Model</label>
                   <input className="input" style={{ width: '100%', fontSize: 13 }}
                     value={editing?.model || ''} onChange={e => field('model', e.target.value)} placeholder="claude-sonnet-4.6" />
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px', borderRadius: 6, background: editing?.is_orchestrator ? 'color-mix(in srgb, var(--purple) 10%, transparent)' : 'var(--surface2)', border: `1px solid ${editing?.is_orchestrator ? 'color-mix(in srgb, var(--purple) 40%, transparent)' : 'var(--border)'}` }}>
+                  <input type="checkbox" id="isOrchestrator" checked={!!editing?.is_orchestrator}
+                    onChange={e => field('is_orchestrator', e.target.checked)} />
+                  <label htmlFor="isOrchestrator" style={{ fontSize: 12, fontWeight: 600, color: editing?.is_orchestrator ? 'var(--purple)' : 'var(--text)', cursor: 'pointer', flex: 1 }}>
+                    Orchestrator
+                  </label>
+                  {editing?.is_orchestrator && (
+                    <span style={{ fontSize: 10, color: 'var(--muted)' }}>Can be assigned to a pipeline, not a stage</span>
+                  )}
                 </div>
 
                 <div>

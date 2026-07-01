@@ -48,6 +48,7 @@ def parse_agent_md(content: str) -> dict:
         "model": frontmatter.get("model", ""),
         "tools": frontmatter.get("tools", []),
         "skills": frontmatter.get("skills", []),
+        "is_orchestrator": bool(frontmatter.get("is_orchestrator", False)),
         "mcp_servers": frontmatter.get("mcp-servers", frontmatter.get("mcp_servers", {})),
         "body": body,
         "frontmatter": frontmatter,
@@ -67,6 +68,8 @@ def build_agent_md(data: dict) -> str:
         fm["tools"] = data["tools"]
     if data.get("skills"):
         fm["skills"] = data["skills"]
+    if data.get("is_orchestrator"):
+        fm["is_orchestrator"] = True
     if data.get("mcp_servers"):
         fm["mcp-servers"] = data["mcp_servers"]
 
@@ -97,6 +100,7 @@ class AgentCreate(BaseModel):
     model: str = ""
     tools: list = []
     skills: list = []
+    is_orchestrator: bool = False
     mcp_servers: dict = {}
 
 
@@ -107,6 +111,7 @@ class AgentUpdate(BaseModel):
     model: Optional[str] = None
     tools: Optional[list] = None
     skills: Optional[list] = None
+    is_orchestrator: Optional[bool] = None
     mcp_servers: Optional[dict] = None
 
 
