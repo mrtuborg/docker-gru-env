@@ -195,6 +195,14 @@ function QuickActionsPanel({ pipelines }: { pipelines: any[] }) {
       if (r.ok) {
         if (d.source === 'skill') setPublishResult({ message: d.message })
         else setPublishResult({ url: d.issue_url, number: d.issue_number })
+        // Collapse the card after a short success flash
+        setTimeout(() => {
+          setExpanded(null)
+          setPublishResult(null)
+          setTitle('')
+          setExtraCtx('')
+          setGeneratedBody('')
+        }, 2500)
       } else setPublishResult({ error: d.detail || 'Publish failed' })
     } catch (e: any) { setPublishResult({ error: e.message }) }
     finally { setPublishing(false) }
