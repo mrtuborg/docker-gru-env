@@ -25,7 +25,15 @@ def parse_agent_md(content: str) -> dict:
             try:
                 frontmatter = yaml.safe_load(parts[1]) or {}
             except yaml.YAMLError:
+                # Fall back to simple line-by-line parsing for unquoted colons
                 frontmatter = {}
+                for line in parts[1].splitlines():
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k and v:
+                            frontmatter[k] = v
             body = parts[2].strip()
         else:
             frontmatter = {}
