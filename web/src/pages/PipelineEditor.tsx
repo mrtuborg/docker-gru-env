@@ -1235,20 +1235,20 @@ export default function PipelineEditor() {
 
               {sel.actor === 'ai' && (
                 <>
-                  {/* Agent selector */}
+                  {/* Agent selector — agent library is the only way to configure AI behaviour */}
                   <div style={{ marginBottom:16 }}>
                     <label className="form-label">Agent</label>
                     <select className="form-input"
                       value={sel.agent_id || ''}
                       onChange={e => updateStage(selectedStage, { agent_id: e.target.value })}>
-                      <option value="">— No agent (use inline prompt) —</option>
+                      <option value="">— Unassigned —</option>
                       {agents.map(a => (
                         <option key={a.id} value={a.id}>{a.name} ({a.id})</option>
                       ))}
                     </select>
-                    {sel.agent_id && (() => {
+                    {sel.agent_id ? (() => {
                       const ag = agents.find(a => a.id === sel.agent_id)
-                      if (!ag) return <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>Agent not found in library</p>
+                      if (!ag) return <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>Agent not found in library — edit in the Agents page</p>
                       return (
                         <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 6, background: 'var(--surface2)', border: '1px solid var(--border)', fontSize: 12 }}>
                           <span style={{ color: 'var(--muted)' }}>{ag.description}</span>
@@ -1258,67 +1258,44 @@ export default function PipelineEditor() {
                           </div>
                         </div>
                       )
-                    })()}
+                    })() : (
+                      <p style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 6 }}>
+                        ⚠ No agent assigned. Go to <strong>Agents</strong> to create or upload an agent, then assign it here.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Task prompt (shown when agent is selected) */}
+                  {/* Task prompt — short override instruction, expanded at runtime */}
                   {sel.agent_id && (
                     <div style={{ marginBottom:16 }}>
-                      <label className="form-label">Task Prompt</label>
+                      <label className="form-label">Task Prompt <span style={{ fontWeight:400, color:'var(--muted)' }}>(optional override)</span></label>
                       <textarea className="form-input" rows={3}
                         value={sel.task_prompt || ''}
                         onChange={e => updateStage(selectedStage, { task_prompt: e.target.value })}
                         placeholder="Process issue #${ISSUE_NUM} at stage ${ISSUE_STAGE}"
                         style={{ fontFamily:'ui-monospace, monospace', fontSize:12 }}/>
                       <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                        Short instruction passed to the agent. Template variables are expanded.
+                        Short instruction prepended to the agent prompt. Template variables are expanded. Leave empty to use the agent as-is.
                       </p>
-                    </div>
-                  )}
-
-                  {/* Inline prompt (shown when no agent selected) */}
-                  {!sel.agent_id && (
-                    <div style={{ marginBottom:16 }}>
-                      <label className="form-label">Prompt</label>
-                      <textarea className="form-input" rows={16} value={sel.prompt}
-                        onChange={e => updateStage(selectedStage, { prompt: e.target.value })}
-                        placeholder="# Stage Prompt&#10;&#10;Write the agent instructions here…"
-                        style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
-                        <label className="btn btn-ghost" style={{ fontSize:11, padding:'4px 8px', cursor:'pointer' }}>
-                          <Upload size={10}/> Load from file
-                          <input type="file" accept=".md,.txt" hidden onChange={e => {
-                            const file = e.target.files?.[0]
-                            if (file) file.text().then(text => updateStage(selectedStage, { prompt: text }))
-                          }}/>
-                        </label>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginTop:6 }}>
+                        {TEMPLATE_VARS.map(v => (
+                          <code key={v} style={{
+                            fontSize:10, padding:'2px 6px', borderRadius:4,
+                            background:'var(--surface2)', border:'1px solid var(--border)',
+                            cursor:'pointer', color:'var(--cyan)',
+                          }} onClick={() => updateStage(selectedStage, { task_prompt: (sel.task_prompt || '') + ' ' + v })}>{v}</code>
+                        ))}
+                        {Object.keys(sel.env).map(k => (
+                          <code key={k} style={{
+                            fontSize:10, padding:'2px 6px', borderRadius:4,
+                            background:'color-mix(in srgb, var(--purple) 12%, transparent)',
+                            border:'1px solid color-mix(in srgb, var(--purple) 25%, transparent)',
+                            color:'var(--purple)',
+                          }}>${'{' + k + '}'}</code>
+                        ))}
                       </div>
                     </div>
                   )}
-
-                  <div style={{ marginBottom:16 }}>
-                    <label className="form-label">Template Variables</label>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                      {TEMPLATE_VARS.map(v => (
-                        <code key={v} style={{
-                          fontSize:10, padding:'2px 6px', borderRadius:4,
-                          background:'var(--surface2)', border:'1px solid var(--border)',
-                          cursor:'pointer', color:'var(--cyan)',
-                        }} onClick={() => {
-                          // Insert at cursor or append
-                          updateStage(selectedStage, { prompt: sel.prompt + ' ' + v })
-                        }}>{v}</code>
-                      ))}
-                      {Object.keys(sel.env).map(k => (
-                        <code key={k} style={{
-                          fontSize:10, padding:'2px 6px', borderRadius:4,
-                          background:'color-mix(in srgb, var(--purple) 12%, transparent)',
-                          border:'1px solid color-mix(in srgb, var(--purple) 25%, transparent)',
-                          color:'var(--purple)',
-                        }}>${'{' + k + '}'}</code>
-                      ))}
-                    </div>
-                  </div>
 
                   {/* Transitions (advanced) */}
                   <div className="divider"/>
