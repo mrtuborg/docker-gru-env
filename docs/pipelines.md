@@ -45,18 +45,20 @@ The pipeline engine is the core of Gru Server. It polls a GitHub Projects v2 boa
 
 ## Stage prompt rendering
 
-Before launching a session, the engine substitutes template variables in the stage prompt:
+Before launching a session, the engine substitutes `${VAR}` template variables in the stage prompt:
 
 | Variable | Value |
 |----------|-------|
 | `${ISSUE_NUM}` | GitHub issue number |
-| `${ISSUE_TITLE}` | Issue title |
-| `${STAGE}` | Current stage/column name |
-| `${REPO}` | `owner/repo` |
-| `${GH_HOST}` | GitHub hostname |
-| `${WORKING_DIR}` | Pipeline working directory |
+| `${ISSUE_REPO}` | Issue repository (`owner/repo`) |
+| `${ISSUE_STAGE}` | Current stage/column name |
+| `${REPO}` | `project_owner/project_number` (for legacy compat) |
+| `${GH_HOST}` | GitHub hostname from connector |
+| `${PROJECT_NUM}` | Projects v2 number |
+| `${PROJECT_OWNER}` | Projects v2 owner (org or user) |
+| `${ALLOWED_REPOS}` | Space-separated list of allowed repos |
 
-Variables come from: stage `env_json`, pipeline config, and the connector config.
+Additional variables come from the stage `env_json` field (merged last, so they can override defaults).
 
 ## Model fallback
 
@@ -78,25 +80,25 @@ Rules:
 
 ```python
 cmd = [
-    "gh", "--hostname", gh_host,
-    "copilot", "session",
+    "timeout", str(timeout_secs),
+    "gh", "copilot", "--",
     "--model", model,
-    "--timeout", f"{timeout_hours}h",
-    "--",
-    prompt_text,
+    "--agent", agent_name,  # optional
+    "-p", prompt_text,
+    "--yolo", "--no-ask-user",
 ]
-# GH_TOKEN injected from connector vault
-env = {**os.environ, "GH_TOKEN": token}
-proc = await asyncio.create_subprocess_exec(*cmd, env=env, ...)
+# GH_TOKEN injected from connector vault; GH_HOST set so gh knows which server
+env = {**os.environ, "GH_HOST": gh_host, "GH_TOKEN": token}
+proc = await asyncio.create_subprocess_exec(*cmd, env=env, cwd=working_dir)
 ```
 
-The session runs as a subprocess. The engine reads stdout for stage-change signals and cost metadata.
+The session runs as a subprocess with combined stdout/stderr captured. Exit code 0 = success.
 
 ## Orchestrator agent
 
-An optional agent with `is_orchestrator = true` can be assigned to a pipeline (not a stage).
+> ⚠️ **Not yet wired in the engine.** The `orchestrator_agent_id` field exists in the schema and the Pipeline Editor UI, but the engine does not currently launch the orchestrator. This is planned for a future iteration.
 
-The orchestrator is launched once per run, in parallel with stage agents. Its role:
+When implemented, an optional agent with `is_orchestrator = true` assigned to a pipeline (not a stage) will:
 - Monitor engine logs for errors
 - Classify failures (script errors, auth failures, infrastructure issues)
 - Self-heal where possible (retry, adjust prompts)
@@ -119,7 +121,7 @@ pipeline_state:      current per-issue state (attempt_count, status: pending/com
 Subscribe to live events:
 
 ```
-GET /api/pipelines/{id}/log
+GET /api/pipelines/{id}/logs
 Content-Type: text/event-stream
 
 data: {"level":"info","message":"Picked issue #42 in HW-Check","issue":42,"stage":"HW-Check"}
@@ -140,7 +142,7 @@ Event levels: `info`, `warn`, `error`, `success`
 | `POST` | `/api/pipelines/{id}/start` | Start the engine |
 | `POST` | `/api/pipelines/{id}/stop` | Stop the engine |
 | `GET` | `/api/pipelines/{id}/status` | Running/stopped + current issue |
-| `GET` | `/api/pipelines/{id}/log` | SSE log stream |
+| `GET` | `/api/pipelines/{id}/logs` | SSE log stream |
 | `GET` | `/api/pipelines/{id}/runs` | Run history |
 
 ## Pipeline YAML format

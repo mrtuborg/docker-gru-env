@@ -1,6 +1,6 @@
 # Environment
 
-The Environment page (`/environment`) provides three types of global configuration that are automatically available to all skill scripts and pipeline runs.
+The Environment page (`/environment`) provides three types of global configuration that are automatically available to **Quick Action skill scripts**. Environment variables and secrets are **not** currently injected into pipeline engine sessions — pipeline sessions only receive `GH_HOST` and `GH_TOKEN` from the connector vault.
 
 ## Variables
 

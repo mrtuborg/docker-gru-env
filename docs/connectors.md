@@ -4,12 +4,12 @@ Connectors are the integration layer between Gru Server and external services. E
 
 ## Built-in connectors
 
-| Type | Class | Purpose |
-|------|-------|---------|
-| `github` | `copilot_connector.py` (GHE PAT mode) | GitHub REST + GraphQL, board management, issue creation |
-| `copilot` | `CopilotConnector` | `gh copilot session` subprocess execution, cost tracking |
-| `azure` | `AzureConnector` | Azure DevOps boards, ADO work items |
-| `obsidian` | `ObsidianConnector` | Obsidian Sync vault read/write |
+| Type | File | Purpose |
+|------|------|---------|
+| `github` | `github_connector.py` | GitHub REST + GraphQL, board management, issue creation, device auth |
+| `copilot` | `copilot_connector.py` | `gh copilot` extension health check; wraps a GitHub connector for session auth |
+| `azure` | `azure_connector.py` | Azure Blob Storage via `az` CLI credential; reads artifact feeds |
+| `obsidian` | `obsidian_connector.py` | Obsidian Sync vault read/write via `ob` CLI |
 
 ## Connector lifecycle
 
@@ -27,8 +27,8 @@ DB row (plugins table)
 The primary connector. Used by the pipeline engine for all GitHub API calls.
 
 **Auth options:**
-- **Classic PAT** (recommended for GHE): `repo`, `project`, `read:org` scopes
-- **OAuth** (github.com): Device flow via `POST /api/auth/github/device`
+- **Classic PAT** (recommended for GHE): `repo`, `project`, `read:org` scopes — stored via `POST /api/plugins/{id}/auth/pat`
+- **OAuth Device flow** (github.com): `POST /api/plugins/{id}/auth/device/start` → `POST /api/plugins/{id}/auth/device/poll`
 
 **Config fields:**
 
@@ -61,16 +61,27 @@ Piggybacks on a GitHub connector for auth. Adds:
 
 ## Azure connector
 
-Connects to Azure DevOps. Config: `organization`, `project`, `pat` (stored in vault).
+Connects to **Azure Blob Storage** via the Azure CLI credential (`az` must be available and `~/.azure` must be mounted into the container). Config:
 
-Currently used for: reading device bundle download URLs from ADO artifact feeds.
+| Field | Description |
+|-------|-------------|
+| `storage_account` | Azure storage account name |
+| `container` | Blob container name (optional) |
+
+Used for: reading device bundle download URLs from artifact blob containers.
 
 ## Obsidian connector
 
-Reads/writes files to an Obsidian vault via Obsidian Sync (requires active subscription).
-Config: `vault_path` (local path or sync endpoint).
+Reads/writes files to an Obsidian vault via the `ob` CLI (Obsidian Sync). Config:
 
-> **Needs human testing** — end-to-end Obsidian Sync test requires an active subscription.
+| Field | Description |
+|-------|-------------|
+| `email` | Obsidian account email |
+| `password` | Obsidian account password (stored encrypted in vault) |
+| `vault_name` | Name of the Obsidian vault |
+| `board_path` | Path within the vault to the board directory |
+
+> **Needs human testing** — end-to-end Obsidian Sync test requires an active Obsidian Sync subscription.
 
 ## Adding a new connector
 

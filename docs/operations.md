@@ -78,7 +78,7 @@ docker rm gru-server-dev
 The Dashboard page shows a health badge per connector. To check health via API:
 
 ```bash
-curl -s http://localhost:9400/api/connectors | python3 -m json.tool
+curl -s http://localhost:9400/api/plugins | python3 -m json.tool
 ```
 
 ### Re-authenticate a connector
@@ -106,7 +106,7 @@ curl -X POST http://localhost:9400/api/pipelines/hil-stress/stop
 ### View live log
 
 ```bash
-curl -N http://localhost:9400/api/pipelines/hil-stress/log
+curl -N http://localhost:9400/api/pipelines/hil-stress/logs
 # or open in browser: http://localhost:9400 → Boards → click pipeline
 ```
 

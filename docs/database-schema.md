@@ -54,25 +54,51 @@ CREATE TABLE credentials (
 
 ---
 
+### `watcher_runs`
+
+Historical board watcher / session run records.
+
+```sql
+CREATE TABLE watcher_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    plugin_id   TEXT NOT NULL,
+    board_ref   TEXT NOT NULL,              -- "owner/number" or path
+    started_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    finished_at TEXT,
+    status      TEXT NOT NULL DEFAULT 'running',  -- running|completed|error
+    log_path    TEXT,
+    FOREIGN KEY (plugin_id) REFERENCES plugins(id)
+);
+```
+
+---
+
 ### `agents`
 
 AI agent definitions.
 
 ```sql
 CREATE TABLE agents (
-    id              TEXT PRIMARY KEY,   -- e.g. "the-vet"
-    name            TEXT NOT NULL,      -- "The Vet"
-    model           TEXT DEFAULT '',
-    description     TEXT DEFAULT '',
-    tools_json      TEXT DEFAULT '[]',  -- ["bash", "gh"]
-    skills_json     TEXT DEFAULT '[]',  -- ["hil-stress"]
-    prompt          TEXT DEFAULT '',    -- full agent prompt body
-    is_orchestrator INTEGER NOT NULL DEFAULT 0,
-    lint_errors     TEXT DEFAULT '[]',
-    created_at      TEXT,
-    updated_at      TEXT
+    id               TEXT PRIMARY KEY,  -- e.g. "the-vet"
+    name             TEXT NOT NULL,     -- "The Vet"
+    description      TEXT DEFAULT '',
+    source           TEXT NOT NULL DEFAULT 'inline',  -- "inline" | "file" | "repo"
+    agent_md         TEXT NOT NULL DEFAULT '',        -- full .agent.md content
+    file_path        TEXT DEFAULT '',   -- path on disk (source=file)
+    repo_url         TEXT DEFAULT '',   -- git clone URL (source=repo)
+    repo_path        TEXT DEFAULT '',   -- path within repo
+    repo_ref         TEXT DEFAULT 'main',
+    model            TEXT DEFAULT '',
+    tools_json       TEXT DEFAULT '[]', -- ["bash", "gh"]
+    skills_json      TEXT DEFAULT '[]', -- ["hil-stress"]
+    mcp_servers_json TEXT DEFAULT '{}', -- {name: {command, args, env}}
+    is_orchestrator  INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT,
+    updated_at       TEXT
 );
 ```
+
+`lint_errors` is **computed** at read time (not stored) by scanning `agent_md` for undeclared skill references.
 
 ---
 

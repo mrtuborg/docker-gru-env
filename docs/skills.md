@@ -24,13 +24,13 @@ skills/
 
 ## Environment injection
 
-When the server calls a skill script, it injects:
+When the server calls a skill script via **Quick Actions**, it injects:
 1. **All variables** from the [Environment page](environment.md) (`/api/env/variables`)
 2. **All secrets** from the [Environment page](environment.md) (`/api/env/secrets`) — decrypted
 3. **Connector tokens** (on Publish only): `GH_TOKEN`, `GH_HOST`
 4. **Pipeline context** (on Publish only): `WORKSPACE` (pipeline working dir)
 
-This means skills can rely on `BATCH_SIZE`, `GH_HOST`, inventory paths, etc. without hardcoding them.
+> **Note:** Environment variables and secrets are **only** injected into Quick Action skill calls. Pipeline engine sessions (stage AI runs) currently only receive `GH_HOST` and `GH_TOKEN` from the connector vault. Stage-specific variables go in the stage `env_json` field.
 
 ## Skill locations
 
