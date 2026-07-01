@@ -324,6 +324,41 @@ export default function Agents() {
                   </div>
                 </div>
 
+                {/* Lint errors */}
+                {editing && (() => {
+                  const md = editing.agent_md || ''
+                  const declared = new Set(editing.skills || [])
+                  const refs = [...new Set(
+                    (md.match(/bash\s+(skills\/[\w/.-]+\.sh)/g) || [])
+                      .map(m => m.replace(/^bash\s+/, ''))
+                  )]
+                  const undeclared = refs.filter(r => !declared.has(r))
+                  if (!undeclared.length) return null
+                  return (
+                    <div style={{ padding: '8px 10px', borderRadius: 6, background: 'color-mix(in srgb, var(--yellow) 10%, transparent)', border: '1px solid color-mix(in srgb, var(--yellow) 30%, transparent)' }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--yellow)', marginBottom: 4 }}>
+                        ⚠ {undeclared.length} undeclared skill{undeclared.length > 1 ? 's' : ''} in prompt
+                      </div>
+                      {undeclared.map(s => {
+                        const label = s.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                        return (
+                          <div key={s} style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                            <span style={{ fontSize: 10, color: 'var(--yellow)', fontFamily: 'monospace' }}>{label}</span>
+                            <button
+                              style={{ fontSize: 10, padding: '1px 6px', borderRadius: 3, background: 'color-mix(in srgb, var(--yellow) 15%, transparent)', border: '1px solid color-mix(in srgb, var(--yellow) 30%, transparent)', color: 'var(--yellow)', cursor: 'pointer' }}
+                              onClick={() => {
+                                const current = editing.skills || []
+                                if (!current.includes(s)) field('skills', [...current, s] as unknown as string[])
+                              }}>
+                              + Add to deps
+                            </button>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+
                 {/* Used by */}
                 {!isNew && selected && (() => {
                   const refs = usedBy(selected.id)

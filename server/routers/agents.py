@@ -171,13 +171,19 @@ async def update(agent_id: str, body: AgentUpdate):
     for k, v in body.dict(exclude_unset=True).items():
         merged[k] = v
 
-    # Re-parse frontmatter if agent_md changed
+    # Re-parse frontmatter if agent_md changed — only override a field if
+    # frontmatter actually declares it (non-empty), to avoid wiping explicit values.
     if "agent_md" in body.dict(exclude_unset=True) and merged["agent_md"]:
         parsed = parse_agent_md(merged["agent_md"])
-        merged["model"] = parsed.get("model", merged.get("model", ""))
-        merged["tools"] = parsed.get("tools", merged.get("tools", []))
-        merged["skills"] = parsed.get("skills", merged.get("skills", []))
-        merged["mcp_servers"] = parsed.get("mcp_servers", merged.get("mcp_servers", {}))
+        fm = parsed.get("frontmatter", {})
+        if parsed.get("model"):
+            merged["model"] = parsed["model"]
+        if parsed.get("tools"):
+            merged["tools"] = parsed["tools"]
+        if "skills" in fm:  # explicitly declared in frontmatter
+            merged["skills"] = parsed["skills"]
+        if parsed.get("mcp_servers"):
+            merged["mcp_servers"] = parsed["mcp_servers"]
 
     await upsert_agent(merged)
     return await get_agent(agent_id)

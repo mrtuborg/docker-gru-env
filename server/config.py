@@ -215,6 +215,19 @@ async def get_all_settings() -> dict[str, str]:
 
 # ── Agent CRUD ────────────────────────────────────────────────────────────────
 
+_SKILL_REF_RE = re.compile(r'bash\s+(skills/[\w/.-]+\.sh)')
+
+def _agent_lint(agent: dict) -> list[str]:
+    """Compute lint errors: skill refs in prompt not declared in agent.skills."""
+    import re as _re
+    md = agent.get("agent_md", "")
+    declared = set(agent.get("skills", []))
+    refs = set(_SKILL_REF_RE.findall(md))
+    undeclared = sorted(refs - declared)
+    errors = [f"Undeclared skill: {s}" for s in undeclared]
+    return errors
+
+
 async def list_agents() -> list[dict]:
     async with aiosqlite.connect(get_db_path()) as db:
         db.row_factory = aiosqlite.Row
@@ -226,6 +239,7 @@ async def list_agents() -> list[dict]:
                 d["tools"] = json.loads(d.pop("tools_json", "[]"))
                 d["skills"] = json.loads(d.pop("skills_json", "[]"))
                 d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+                d["lint_errors"] = _agent_lint(d)
                 result.append(d)
             return result
 
@@ -241,6 +255,7 @@ async def get_agent(agent_id: str) -> dict | None:
             d["tools"] = json.loads(d.pop("tools_json", "[]"))
             d["skills"] = json.loads(d.pop("skills_json", "[]"))
             d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+            d["lint_errors"] = _agent_lint(d)
             return d
 
 

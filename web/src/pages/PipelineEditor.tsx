@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
   Upload, Download, RefreshCw, ArrowUp, ArrowDown, X,
-  FileUp, Clipboard, Eye, Pencil, Wrench, ArrowRight, Play, Pause,
+  FileUp, Clipboard, Eye, Pencil, Wrench, ArrowRight, Play, Pause, AlertTriangle,
 } from 'lucide-react'
 
 interface Stage {
@@ -25,6 +25,7 @@ interface AgentInfo {
   model: string
   tools: string[]
   skills: string[]
+  lint_errors: string[]
 }
 
 interface ModelConfig {
@@ -173,16 +174,23 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
   const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
   const aiStages = pipeline.stages.filter(s => s.actor === 'ai')
 
-  // Collect all unique tools across all stages
+  // Collect all unique tools + skills across all stages
   const allTools = Array.from(new Set(
     pipeline.stages.flatMap(s => {
       const ag = s.agent_id ? agentMap[s.agent_id] : null
       return ag ? ag.tools : []
     })
   ))
+  const allSkills = Array.from(new Set(
+    pipeline.stages.flatMap(s => {
+      const ag = s.agent_id ? agentMap[s.agent_id] : null
+      return ag ? ag.skills : []
+    })
+  ))
 
-  // tool → list of stage indices that have it
+  // tool/skill → list of stage indices that have it
   const toolStageMap: Record<string, number[]> = {}
+  const skillStageMap: Record<string, number[]> = {}
   pipeline.stages.forEach((s, i) => {
     const ag = s.agent_id ? agentMap[s.agent_id] : null
     if (!ag) return
@@ -190,11 +198,19 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
       if (!toolStageMap[t]) toolStageMap[t] = []
       toolStageMap[t].push(i)
     })
+    ag.skills.forEach(sk => {
+      if (!skillStageMap[sk]) skillStageMap[sk] = []
+      skillStageMap[sk].push(i)
+    })
   })
 
   const sharedTools = allTools
     .filter(t => toolStageMap[t]?.length > 1)
     .sort((a, b) => (toolStageMap[b]?.length || 0) - (toolStageMap[a]?.length || 0))
+
+  const sharedSkills = allSkills
+    .filter(sk => skillStageMap[sk]?.length > 1)
+    .sort((a, b) => (skillStageMap[b]?.length || 0) - (skillStageMap[a]?.length || 0))
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
@@ -211,27 +227,34 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
               const isHuman = stage.actor === 'human'
               const hasPrompt = !!(stage.prompt || stage.task_prompt)
               const tools = ag ? ag.tools : []
+              const hasLintErrors = ag && ag.lint_errors.length > 0
 
               return (
                 <div key={i} style={{ display:'flex', alignItems:'center' }}>
                   {/* Stage card */}
                   <div
                     onClick={() => onEditStage(i)}
-                    title="Click to edit this stage"
+                    title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
                     style={{
-                      width: 148, borderRadius:8, border:'1px solid var(--border)',
-                      background: isHuman
-                        ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
-                        : 'var(--surface)',
+                      width: 148, borderRadius:8,
+                      border: hasLintErrors
+                        ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
+                        : '1px solid var(--border)',
+                      background: hasLintErrors
+                        ? 'color-mix(in srgb, var(--yellow) 5%, var(--surface))'
+                        : isHuman
+                          ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
+                          : 'var(--surface)',
                       cursor:'pointer', overflow:'hidden',
                       transition:'border-color 0.15s, box-shadow 0.15s',
+                      opacity: hasLintErrors ? 0.75 : 1,
                     }}
                     onMouseEnter={e => {
-                      ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--accent)'
-                      ;(e.currentTarget as HTMLDivElement).style.boxShadow = '0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent)'
+                      ;(e.currentTarget as HTMLDivElement).style.borderColor = hasLintErrors ? 'var(--yellow)' : 'var(--accent)'
+                      ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 3px color-mix(in srgb, ${hasLintErrors ? 'var(--yellow)' : 'var(--accent)'} 15%, transparent)`
                     }}
                     onMouseLeave={e => {
-                      ;(e.currentTarget as HTMLDivElement).style.borderColor = 'var(--border)'
+                      ;(e.currentTarget as HTMLDivElement).style.borderColor = hasLintErrors ? 'color-mix(in srgb, var(--yellow) 60%, transparent)' : 'var(--border)'
                       ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
                     }}
                   >
@@ -239,17 +262,21 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                     <div style={{
                       padding:'8px 10px', display:'flex', alignItems:'center', gap:6,
                       borderBottom:'1px solid var(--border)',
-                      background: isHuman
-                        ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
-                        : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                      background: hasLintErrors
+                        ? 'color-mix(in srgb, var(--yellow) 10%, transparent)'
+                        : isHuman
+                          ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
+                          : 'color-mix(in srgb, var(--accent) 8%, transparent)',
                     }}>
                       <div style={{
                         width:22, height:22, borderRadius:5, display:'flex', alignItems:'center', justifyContent:'center',
-                        background: isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
-                        color: isHuman ? 'var(--muted)' : 'var(--accent)',
+                        background: hasLintErrors
+                          ? 'color-mix(in srgb, var(--yellow) 25%, transparent)'
+                          : isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                        color: hasLintErrors ? 'var(--yellow)' : isHuman ? 'var(--muted)' : 'var(--accent)',
                         flexShrink:0,
                       }}>
-                        {isHuman ? <User size={12}/> : <Bot size={12}/>}
+                        {hasLintErrors ? <AlertTriangle size={12}/> : isHuman ? <User size={12}/> : <Bot size={12}/>}
                       </div>
                       <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                         {stage.column || '(unnamed)'}
@@ -257,9 +284,18 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
                     </div>
 
-                    {/* Body: agent + model */}
+                    {/* Body: agent + model, or lint errors */}
                     <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', minHeight:36 }}>
-                      {isHuman ? (
+                      {hasLintErrors ? (
+                        <div>
+                          <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', marginBottom:3, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                            {ag!.name || ag!.id}
+                          </div>
+                          <div style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>
+                            ⚠ {ag!.lint_errors.length} dependency error{ag!.lint_errors.length > 1 ? 's' : ''}
+                          </div>
+                        </div>
+                      ) : isHuman ? (
                         <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:6 }}>
                           Human gate
                         </div>
@@ -395,8 +431,57 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
           )}
         </div>
 
+        {/* Shared Skills */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>
+            🔧 Shared Skills
+          </div>
+
+          {sharedSkills.length > 0 ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {sharedSkills.map(sk => {
+                const stageIdxs = skillStageMap[sk] || []
+                const pct = Math.round((stageIdxs.length / Math.max(aiStages.length, 1)) * 100)
+                const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                return (
+                  <div key={sk}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                      <span title={sk} style={{
+                        fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4,
+                        background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                        color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                        flexShrink:0,
+                      }}>{label}</span>
+                      <span style={{ fontSize:11, color:'var(--muted)', marginLeft:'auto', flexShrink:0 }}>
+                        {stageIdxs.length}/{aiStages.length} stages
+                      </span>
+                    </div>
+                    <div style={{ height:6, borderRadius:3, background:'var(--surface2)', overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${pct}%`, borderRadius:3, background:'var(--green)', transition:'width 0.4s' }}/>
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:3, marginTop:4 }}>
+                      {stageIdxs.map(idx => (
+                        <button key={idx} className="btn btn-ghost"
+                          onClick={() => onEditStage(idx)}
+                          style={{ fontSize:9, padding:'1px 5px', borderRadius:3, border:'1px solid var(--border)', color:'var(--muted)' }}>
+                          {pipeline.stages[idx]?.column || `#${idx+1}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="card" style={{ padding:14, color:'var(--muted)', fontSize:12, textAlign:'center' }}>
+              <div style={{ fontSize:20, marginBottom:8 }}>🔧</div>
+              <div>Skills shared across 2+ stages will appear here.</div>
+            </div>
+          )}
+        </div>
+
         {/* Pipeline stats summary */}
-        <div style={{ width:240, flexShrink:0 }}>
+        <div style={{ width:200, flexShrink:0 }}>
           <div className="card" style={{ padding:12 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
               <span style={{ fontSize:11, fontWeight:600, color:'var(--muted)', flex:1 }}>Pipeline Stats</span>
@@ -413,9 +498,11 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                 { label:'AI stages', value: aiStages.length },
                 { label:'Human gates', value: pipeline.stages.length - aiStages.length },
                 { label:'Shared tools', value: sharedTools.length },
-              ].map(({ label, value }) => (
+                { label:'Shared skills', value: sharedSkills.length },
+                { label:'Lint errors', value: agents.filter(a => a.lint_errors?.length).length, warn: true },
+              ].map(({ label, value, warn }) => (
                 <div key={label} style={{ textAlign:'center', padding:'6px 0' }}>
-                  <div style={{ fontSize:20, fontWeight:800, color:'var(--accent)' }}>{value}</div>
+                  <div style={{ fontSize:20, fontWeight:800, color: warn && value > 0 ? 'var(--yellow)' : 'var(--accent)' }}>{value}</div>
                   <div style={{ fontSize:10, color:'var(--muted)' }}>{label}</div>
                 </div>
               ))}
