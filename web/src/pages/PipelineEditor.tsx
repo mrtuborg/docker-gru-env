@@ -267,7 +267,7 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                     </div>
 
                     {/* Body: agent + model */}
-                    <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', minHeight:54 }}>
+                    <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)', minHeight:36 }}>
                       {isHuman ? (
                         <div style={{ color:'var(--muted)', fontSize:11, textAlign:'center', paddingTop:6 }}>
                           Human gate
@@ -287,7 +287,7 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                         </>
                       ) : (
                         <div style={{ color:'var(--muted)', fontSize:11 }}>
-                          {hasPrompt ? 'Inline prompt' : <span style={{ color:'var(--red)', fontSize:11 }}>No agent / prompt</span>}
+                          {!hasPrompt && <span style={{ color:'var(--red)', fontSize:11 }}>No agent / prompt</span>}
                         </div>
                       )}
                     </div>
@@ -300,9 +300,32 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                           background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
                           color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
                         }}>{t}</span>
-                      )) : hasPrompt ? (
-                        <span style={{ fontSize:9, color:'var(--muted)' }}>inline prompt ✓</span>
-                      ) : null}
+                      )                      ) : hasPrompt ? (() => {
+                          const lines = stage.prompt.split('\n')
+                          const steps = lines.filter((l: string) => /^#{1,3}\s+Step\s+\d/i.test(l)).length
+                          const skills = [...new Set(
+                            (stage.prompt.match(/bash\s+(skills\/[\w/-]+\.sh)/g) || [])
+                              .map((m: string) => m.replace(/^bash\s+skills\/[\w-]+\//, '').replace('.sh', ''))
+                          )] as string[]
+                          return (
+                            <div style={{ display:'flex', gap:4, alignItems:'center', flexWrap:'wrap' }}>
+                              {steps > 0 && (
+                                <span style={{
+                                  fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                                  background:'color-mix(in srgb, var(--accent) 14%, transparent)',
+                                  color:'var(--accent)',
+                                }}>{steps} steps</span>
+                              )}
+                              {skills.slice(0, 2).map((sk: string) => (
+                                <span key={sk} style={{
+                                  fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                                  background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                                  color:'var(--green)',
+                                }}>{sk}</span>
+                              ))}
+                            </div>
+                          )
+                        })() : null}
                     </div>
                   </div>
 
