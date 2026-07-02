@@ -74,7 +74,7 @@ function IssueRow({ item, dim, showMeta }: { item: any; dim?: boolean; showMeta?
       <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 12, minWidth: 40 }}>#{item.number || item.issue_number || '—'}</span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {item.title || item.issue_title || item.name || '(untitled)'}
+          {item.title || item.issue_title || item.name || `#${item.number || item.issue_number}`}
         </div>
         {showMeta && (item.model || elapsed !== null) && (
           <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', gap: 8 }}>

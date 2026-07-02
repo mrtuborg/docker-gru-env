@@ -304,12 +304,18 @@ async def get_status(pipeline_id: str, request: Request):
     if live["active"]:
         a = live["active"]
         active_key = (a.get("number"), a.get("repo"), a.get("stage"))
-    for run in recent[:5]:
+    seen_issues: set[tuple] = set()
+    for run in recent[:10]:
         items = await get_pipeline_run_items(run["id"])
         for item in items:
             # Don't show the currently-active issue in recently processed
             if active_key and (item["issue_number"], item["issue_repo"], item["stage"]) == active_key:
                 continue
+            # Deduplicate: one entry per issue (keep first/most recent occurrence)
+            dedup_key = (item["issue_number"], item["issue_repo"])
+            if dedup_key in seen_issues:
+                continue
+            seen_issues.add(dedup_key)
             recent_items.append({**item, "run_id": run["id"]})
     return {
         "pipeline_id": pipeline_id,
