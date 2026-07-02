@@ -322,7 +322,7 @@ class AnalyticsConnector(GruConnector):
         """Assemble the Postgres DSN from config (no password — trust auth)."""
         env_url = os.environ.get("ANALYTICS_DB_URL", "")
         if env_url and not self._config.get("host"):
-            return env_url                   # env var wins when no explicit config
+            return self._translate_loopback(env_url)
 
         host = self._config.get("host", "")
         if not host:
@@ -338,6 +338,14 @@ class AnalyticsConnector(GruConnector):
         user = self._config.get("user", "gru")
 
         return f"postgresql://{user}@{host}:{port}/{db}"
+
+    @staticmethod
+    def _translate_loopback(url: str) -> str:
+        """Replace loopback hostnames in a DSN with host.docker.internal."""
+        for loopback in ("localhost", "127.0.0.1", "::1"):
+            if f"@{loopback}:" in url:
+                return url.replace(f"@{loopback}:", "@host.docker.internal:", 1)
+        return url
 
     async def health(self) -> ConnectorHealth:
         if self._pool is None:
