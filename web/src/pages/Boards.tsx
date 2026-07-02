@@ -61,16 +61,28 @@ function StageTag({ stage }: { stage: string }) {
 
 // ── Issue row ─────────────────────────────────────────────────────────────────
 
-function IssueRow({ item, dim }: { item: any; dim?: boolean }) {
+function IssueRow({ item, dim, showMeta }: { item: any; dim?: boolean; showMeta?: boolean }) {
+  const elapsed = item.started_at
+    ? Math.round((Date.now() - new Date(item.started_at).getTime()) / 1000 / 60)
+    : null
+
   return (
     <div style={{
       display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
       borderBottom: '1px solid var(--border)', opacity: dim ? 0.5 : 1,
     }}>
       <span style={{ color: 'var(--muted)', fontFamily: 'monospace', fontSize: 12, minWidth: 40 }}>#{item.number || item.issue_number || '—'}</span>
-      <span style={{ flex: 1, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {item.title || item.issue_title || item.name || '(untitled)'}
-      </span>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {item.title || item.issue_title || item.name || '(untitled)'}
+        </div>
+        {showMeta && (item.model || elapsed !== null) && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', gap: 8 }}>
+            {item.model && <span>⚡ {item.model}</span>}
+            {elapsed !== null && <span>🕐 {elapsed}m ago</span>}
+          </div>
+        )}
+      </div>
       <StageTag stage={item.stage || item.column || '?'} />
     </div>
   )
@@ -144,7 +156,7 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
       {!loading && active.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <SectionHeader icon={<Play size={11} />} label="Active" color="var(--green)" />
-          {active.map((item, i) => <IssueRow key={i} item={item} />)}
+          {active.map((item, i) => <IssueRow key={i} item={item} showMeta />)}
         </div>
       )}
 

@@ -271,7 +271,8 @@ class PipelineEngine:
 
         # Publish initial queue (actionable issues not yet active)
         def _as_dict(iss: BoardIssue) -> dict:
-            return {"number": iss.number, "repo": iss.repo, "stage": iss.stage, "title": iss.title}
+            return {"number": iss.number, "repo": iss.repo, "stage": iss.stage,
+                    "title": iss.title, "labels": iss.labels}
 
         actionable = [
             iss for iss in issues
