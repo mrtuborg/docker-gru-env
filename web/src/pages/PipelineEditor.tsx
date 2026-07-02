@@ -177,6 +177,7 @@ interface ArrowPath {
   cx2: number; cy2: number
   x2: number; y2: number
   type: 'success' | 'failure'
+  straight: boolean  // adjacent success → horizontal side-to-side line
 }
 
 function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
@@ -207,16 +208,19 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
   })
 
   // Pre-compute padding from edge structure (no circular dependency with layout)
-  const maxSuccessSkip = Math.max(0, ...edges.filter(e => e.type === 'success').map(e => Math.abs(e.to - e.from)))
+  // svgPaddingTop only needed for non-adjacent success arcs (adjacent go side-to-side)
+  const nonAdjSuccess = edges.filter(e => e.type === 'success' && Math.abs(e.to - e.from) > 1)
+  const maxNonAdjSuccessSkip = Math.max(0, ...nonAdjSuccess.map(e => Math.abs(e.to - e.from)))
   const maxFailureSkip = Math.max(0, ...edges.filter(e => e.type === 'failure').map(e => Math.abs(e.to - e.from)))
-  const svgPaddingTop = edges.some(e => e.type === 'success') ? ARC_BASE + maxSuccessSkip * ARC_STEP + 14 : 10
+  const svgPaddingTop = nonAdjSuccess.length > 0 ? ARC_BASE + maxNonAdjSuccessSkip * ARC_STEP + 14 : 10
   const svgPaddingBottom = edges.some(e => e.type === 'failure') ? ARC_BASE + maxFailureSkip * ARC_STEP + 14 : 10
 
   const edgeKey = edges.map(e => `${e.from}-${e.to}-${e.type}`).join(',')
 
-  // Measure card positions and compute cubic-bezier arrow paths.
-  // Success arrows: top-center anchors, arc ABOVE cards (no card overlap).
-  // Failure arrows: bottom-center anchors, arc BELOW cards.
+  // Measure card positions and compute arrow paths.
+  // Adjacent success  → horizontal side-to-side line (right-center to left-center)
+  // Non-adjacent success → cubic bezier arc above (top-center anchors)
+  // All failure        → cubic bezier arc below (bottom-center anchors)
   const measureArrows = useCallback(() => {
     const container = containerRef.current
     if (!container) return
@@ -238,18 +242,27 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
 
       const skip = Math.abs(e.to - e.from)
       const arcH = ARC_BASE + skip * ARC_STEP
+      const isAdjacent = skip === 1
 
       let x1, y1, cx1, cy1, cx2, cy2, x2, y2
+      let straight = false
 
-      if (e.type === 'success') {
-        // Anchor at top-center; control points arc above
+      if (e.type === 'success' && isAdjacent) {
+        // Straight horizontal line: right-center → left-center through the gap
+        x1 = fr.x + fr.w;  y1 = fr.y + fr.h / 2
+        x2 = tr.x;         y2 = tr.y + tr.h / 2
+        cx1 = x1;  cy1 = y1  // degenerate bezier = straight line
+        cx2 = x2;  cy2 = y2
+        straight = true
+      } else if (e.type === 'success') {
+        // Arc above for skip connections (top-center anchors)
         x1 = fr.x + fr.w / 2;  y1 = fr.y
         x2 = tr.x + tr.w / 2;  y2 = tr.y
         const peak = Math.min(y1, y2) - arcH
         cx1 = x1;  cy1 = peak
         cx2 = x2;  cy2 = peak
       } else {
-        // Anchor at bottom-center; control points arc below
+        // Failure: arc below, bottom-center anchors
         x1 = fr.x + fr.w / 2;  y1 = fr.y + fr.h
         x2 = tr.x + tr.w / 2;  y2 = tr.y + tr.h
         const trough = Math.max(y1, y2) + arcH
@@ -257,7 +270,7 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
         cx2 = x2;  cy2 = trough
       }
 
-      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type } as ArrowPath
+      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type, straight } as ArrowPath
     }).filter(Boolean) as ArrowPath[]
 
     // Height covers cards + failure arc space below
@@ -445,10 +458,26 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
               const markerId = isSuccess ? 'arrow-success' : 'arrow-failure'
               const label = isSuccess ? '✓' : '✗'
 
-              // Bezier midpoint at t=0.5: B(0.5) = (P0 + 3P1 + 3P2 + P3) / 8
+              if (a.straight) {
+                // Horizontal side-to-side success arrow through the gap
+                const mx = (a.x1 + a.x2) / 2
+                const my = a.y1  // same Y for both (equal-height cards)
+                return (
+                  <g key={idx}>
+                    <line x1={a.x1} y1={my} x2={a.x2 - 6} y2={my}
+                      stroke={color} strokeWidth="1.5" markerEnd={`url(#${markerId})`} />
+                    {/* Label pill floats slightly above the line */}
+                    <rect x={mx - 8} y={my - 18} width={16} height={13} rx={3}
+                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
+                    <text x={mx} y={my - 11} textAnchor="middle" dominantBaseline="middle"
+                      fontSize="9" fontWeight="700" fill={color}>{label}</text>
+                  </g>
+                )
+              }
+
+              // Cubic bezier arc (non-adjacent success above, or failure below)
               const lx = (a.x1 + 3 * a.cx1 + 3 * a.cx2 + a.x2) / 8
               const ly = (a.y1 + 3 * a.cy1 + 3 * a.cy2 + a.y2) / 8
-
               const d = `M ${a.x1} ${a.y1} C ${a.cx1} ${a.cy1}, ${a.cx2} ${a.cy2}, ${a.x2} ${a.y2}`
               return (
                 <g key={idx}>
@@ -456,7 +485,6 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
                     markerEnd={`url(#${markerId})`}
                     strokeDasharray={isSuccess ? undefined : '5 3'}
                   />
-                  {/* Label pill at bezier midpoint */}
                   <rect x={lx - 8} y={ly - 7} width={16} height={13} rx={3}
                     fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
                   <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
