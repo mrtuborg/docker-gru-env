@@ -407,6 +407,7 @@ class PipelineEngine:
             await add_pipeline_run_item(run_id, {
                 "issue_number": issue.number,
                 "issue_repo": issue.repo,
+                "issue_title": issue.title,
                 "stage": issue.stage,
                 "status": "success" if (result.exit_code == 0 and result.stage_changed) else
                           "timeout" if result.timed_out else "failure",
@@ -645,9 +646,14 @@ class PipelineEngine:
         # --no-ask-user disables the ask_user tool so agent works autonomously
         cmd.extend(["-p", prompt, "--yolo", "--no-ask-user"])
 
+        # GH_HOST directs gh/copilot to the right GHE instance.
+        # Do NOT set GH_TOKEN here: copilot CLI rejects classic PATs (ghp_) and
+        # the container already has working Copilot auth via cached credentials.
+        # The vault token is still available to gh subprocesses via GH_VAULT_TOKEN
+        # if skills/agents need it explicitly.
         env = {**os.environ, "GH_HOST": gh_host}
         if token:
-            env["GH_TOKEN"] = token
+            env["GH_VAULT_TOKEN"] = token  # available to skill scripts, not copilot itself
 
         start = time.monotonic()
         try:
@@ -669,6 +675,14 @@ class PipelineEngine:
 
         duration = time.monotonic() - start
         timed_out = exit_code == 124
+
+        output_text = stdout.decode(errors="replace") if stdout else ""
+        if exit_code != 0 and not timed_out:
+            # Log first 500 chars of output to help diagnose failures
+            preview = output_text[:500].strip()
+            if preview:
+                self._emit(pipeline["id"], "error",
+                    f"Session exited {exit_code}: {preview[:200]}")
 
         return SessionResult(
             exit_code=exit_code,

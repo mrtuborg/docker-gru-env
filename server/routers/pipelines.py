@@ -199,12 +199,14 @@ async def start_pipeline(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
+    # Write enabled=True BEFORE starting the engine so the watcher loop
+    # sees it immediately when it calls get_pipeline() on its first tick.
+    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
+    await upsert_pipeline({**p, "enabled": True})
     engine = request.app.state.engine
     started = await engine.start(pipeline_id)
     if not started:
         return {"status": "already_running", "pipeline_id": pipeline_id}
-    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
-    await upsert_pipeline({**p, "enabled": True})
     return {"status": "started", "pipeline_id": pipeline_id}
 
 
@@ -298,9 +300,16 @@ async def get_status(pipeline_id: str, request: Request):
 
     recent = await list_pipeline_runs(pipeline_id, limit=20)
     recent_items: list[dict] = []
+    active_key = None
+    if live["active"]:
+        a = live["active"]
+        active_key = (a.get("number"), a.get("repo"), a.get("stage"))
     for run in recent[:5]:
         items = await get_pipeline_run_items(run["id"])
         for item in items:
+            # Don't show the currently-active issue in recently processed
+            if active_key and (item["issue_number"], item["issue_repo"], item["stage"]) == active_key:
+                continue
             recent_items.append({**item, "run_id": run["id"]})
     return {
         "pipeline_id": pipeline_id,

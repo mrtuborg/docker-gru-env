@@ -141,6 +141,7 @@ CREATE TABLE IF NOT EXISTS pipeline_run_items (
     run_id        TEXT NOT NULL,
     issue_number  INTEGER NOT NULL,
     issue_repo    TEXT NOT NULL,
+    issue_title   TEXT,
     stage         TEXT NOT NULL,
     status        TEXT NOT NULL,
     started_at    TEXT,
@@ -194,6 +195,7 @@ async def init_db() -> None:
             "ALTER TABLE agents ADD COLUMN skills_json TEXT DEFAULT '[]'",
             "ALTER TABLE agents ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE pipelines ADD COLUMN orchestrator_agent_id TEXT DEFAULT ''",
+            "ALTER TABLE pipeline_run_items ADD COLUMN issue_title TEXT",
         ]
         for stmt in migrations:
             try:
@@ -558,12 +560,12 @@ async def list_pipeline_runs(pipeline_id: str, limit: int = 50) -> list[dict]:
 async def add_pipeline_run_item(run_id: str, item: dict) -> None:
     async with aiosqlite.connect(get_db_path()) as db:
         await db.execute(
-            """INSERT INTO pipeline_run_items(run_id, issue_number, issue_repo, stage,
+            """INSERT INTO pipeline_run_items(run_id, issue_number, issue_repo, issue_title, stage,
                    status, started_at, ended_at, duration_s, model, cost_usd, session_id, error_message)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                run_id, item["issue_number"], item["issue_repo"], item["stage"],
-                item["status"], item.get("started_at"), item.get("ended_at"),
+                run_id, item["issue_number"], item["issue_repo"], item.get("issue_title"),
+                item["stage"], item["status"], item.get("started_at"), item.get("ended_at"),
                 item.get("duration_s"), item.get("model"), item.get("cost_usd"),
                 item.get("session_id"), item.get("error_message"),
             ),
