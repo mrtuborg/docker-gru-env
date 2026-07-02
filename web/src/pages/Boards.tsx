@@ -1,5 +1,46 @@
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send } from 'lucide-react'
+import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send, User } from 'lucide-react'
+
+// ── Issue classifier ──────────────────────────────────────────────────────────
+// The pipeline exposes classifier rules; the board uses them without knowing
+// pipeline internals. This is the contract between Pipeline and Board.
+
+interface ClassifierConfig {
+  humanStages: string[]   // stage/column names configured as actor='human'
+  humanLabels: string[]   // labels that signal human intervention needed
+}
+
+type IssueCategory = 'active' | 'waiting_human' | 'ai_queue'
+
+/**
+ * Pure classifier function — no side effects, no knowledge of pipeline internals.
+ * Takes the pipeline's classifier config and classifies a single issue.
+ */
+function classifyIssue(
+  issue: { stage?: string; labels?: string[] },
+  config: ClassifierConfig,
+): IssueCategory {
+  if (config.humanStages.includes(issue.stage ?? '')) return 'waiting_human'
+  if (issue.labels?.some(l => config.humanLabels.includes(l))) return 'waiting_human'
+  return 'ai_queue'
+}
+
+/**
+ * Partition the queued list from the status API into ai_queue and waiting_human.
+ * active issues come directly from status.active (engine tracks them separately).
+ */
+function partitionQueue(
+  queued: any[],
+  config: ClassifierConfig,
+): { aiQueue: any[]; waitingHuman: any[] } {
+  const aiQueue: any[] = []
+  const waitingHuman: any[] = []
+  for (const item of queued) {
+    if (classifyIssue(item, config) === 'waiting_human') waitingHuman.push(item)
+    else aiQueue.push(item)
+  }
+  return { aiQueue, waitingHuman }
+}
 
 // ── Stage tag ─────────────────────────────────────────────────────────────────
 
@@ -35,6 +76,22 @@ function IssueRow({ item, dim }: { item: any; dim?: boolean }) {
   )
 }
 
+// ── Section header ────────────────────────────────────────────────────────────
+
+function SectionHeader({ icon, label, count, color }: {
+  icon: React.ReactNode; label: string; count?: number; color: string
+}) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700,
+      color, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6,
+    }}>
+      {icon}
+      {label}{count !== undefined ? ` (${count})` : ''}
+    </div>
+  )
+}
+
 // ── Pipeline activity card ────────────────────────────────────────────────────
 
 function PipelineActivity({ pipeline }: { pipeline: any }) {
@@ -52,10 +109,18 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
 
   useEffect(() => { load() }, [pipeline.id])
 
+  // Build classifier config from what the pipeline tells us — board never hardcodes these
+  const classifierConfig: ClassifierConfig = {
+    humanStages: status?.classifier?.human_stages ?? [],
+    humanLabels: status?.classifier?.human_labels ?? [],
+  }
+
   const active: any[] = status?.active ? [status.active] : []
-  const queued: any[] = status?.queued || []
+  const { aiQueue, waitingHuman } = partitionQueue(status?.queued || [], classifierConfig)
   const recent: any[] = (status?.recent || []).slice(0, 5)
-  const isEmpty = active.length === 0 && queued.length === 0 && recent.length === 0
+  const isEmpty = active.length === 0 && aiQueue.length === 0 && waitingHuman.length === 0 && recent.length === 0
+
+  const QUEUE_SHOW = 8
 
   return (
     <div className="card" style={{ padding: '16px 20px' }}>
@@ -75,28 +140,40 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
       {loading && <div style={{ display: 'flex', gap: 8, color: 'var(--muted)', fontSize: 13 }}><div className="spinner" style={{ width: 14, height: 14 }} /> Loading…</div>}
       {!loading && isEmpty && <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No activity yet — pipeline is idle.</div>}
 
+      {/* Active — currently being processed by AI agents */}
       {!loading && active.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--green)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-            <Play size={11} /> Active
-          </div>
+          <SectionHeader icon={<Play size={11} />} label="Active" color="var(--green)" />
           {active.map((item, i) => <IssueRow key={i} item={item} />)}
         </div>
       )}
-      {!loading && queued.length > 0 && (
+
+      {/* Waiting for Human — human stages or human-signal labels */}
+      {!loading && waitingHuman.length > 0 && (
         <div style={{ marginBottom: 16 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-            <Clock size={11} /> Queued ({queued.length})
-          </div>
-          {queued.slice(0, 8).map((item, i) => <IssueRow key={i} item={item} />)}
-          {queued.length > 8 && <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{queued.length - 8} more</div>}
+          <SectionHeader icon={<User size={11} />} label="Waiting for Human" count={waitingHuman.length} color="var(--yellow)" />
+          {waitingHuman.slice(0, QUEUE_SHOW).map((item, i) => <IssueRow key={i} item={item} />)}
+          {waitingHuman.length > QUEUE_SHOW && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{waitingHuman.length - QUEUE_SHOW} more</div>
+          )}
         </div>
       )}
+
+      {/* AI Queue — waiting for pipeline agents to pick up */}
+      {!loading && aiQueue.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <SectionHeader icon={<Clock size={11} />} label="AI Queue" count={aiQueue.length} color="var(--accent)" />
+          {aiQueue.slice(0, QUEUE_SHOW).map((item, i) => <IssueRow key={i} item={item} />)}
+          {aiQueue.length > QUEUE_SHOW && (
+            <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{aiQueue.length - QUEUE_SHOW} more</div>
+          )}
+        </div>
+      )}
+
+      {/* Recently processed */}
       {!loading && recent.length > 0 && (
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>
-            <CheckCircle2 size={11} /> Recently processed
-          </div>
+          <SectionHeader icon={<CheckCircle2 size={11} />} label="Recently Processed" color="var(--muted)" />
           {recent.map((item, i) => <IssueRow key={i} item={item} dim />)}
         </div>
       )}

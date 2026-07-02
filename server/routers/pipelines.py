@@ -278,11 +278,23 @@ async def get_status(pipeline_id: str, request: Request):
                 issues = await engine._query_board(p, token)
                 stages = {s.get("column") or s.get("column_name", "") for s in (p.get("stages") or [])}
                 queued = [
-                    {"number": i.number, "repo": i.repo, "stage": i.stage, "title": i.title}
+                    {"number": i.number, "repo": i.repo, "stage": i.stage,
+                     "title": i.title, "labels": i.labels}
                     for i in issues if i.stage in stages
                 ]
         except Exception:
             pass  # best-effort; don't fail the endpoint
+
+    # ── Classifier config: pipeline exposes its human-stage rules ────────────
+    # This is the contract between Pipeline and Board — board uses these rules
+    # to classify issues without knowing pipeline internals.
+    human_stages = [
+        s.get("column") or s.get("column_name", "")
+        for s in (p.get("stages") or [])
+        if s.get("actor", "ai") == "human"
+    ]
+    # Well-known human-signal labels; pipeline owner can extend via stage config
+    human_labels = ["human-only", "needs-human", "needs-review", "watcher-needs-human"]
 
     recent = await list_pipeline_runs(pipeline_id, limit=20)
     recent_items: list[dict] = []
@@ -296,6 +308,10 @@ async def get_status(pipeline_id: str, request: Request):
         "active": live["active"],
         "queued": queued,
         "recent": recent_items[:20],
+        "classifier": {
+            "human_stages": [s for s in human_stages if s],
+            "human_labels": human_labels,
+        },
     }
 
 

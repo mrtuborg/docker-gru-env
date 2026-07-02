@@ -63,6 +63,11 @@ class BoardIssue:
     repo: str
     stage: str
     title: str = ""
+    labels: list = None  # type: ignore[assignment]
+
+    def __post_init__(self):
+        if self.labels is None:
+            self.labels = []
 
 
 @dataclass
@@ -524,6 +529,7 @@ class PipelineEngine:
                             repo=repo,
                             stage=stage,
                             title=content.get("title", ""),
+                            labels=labels,
                         ))
 
                 page_info = items_data.get("pageInfo", {})
