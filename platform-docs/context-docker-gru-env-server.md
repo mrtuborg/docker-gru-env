@@ -90,6 +90,97 @@ Key files for next session:
 
 ---
 
+## Track: vladimir-nosenko-analytics-db-web-ui — Analytics DB Web UI
+
+**Branch:** `vladimir-nosenko-analytics-db-web-ui`
+**Repo:** `/Users/vn/ws/platform-development/copilot-worktrees/docker-gru-env-server/vladimir-nosenko-improved-spork`
+**Active project:** N/A (no GHE project board — tracked in repo directly)
+
+### What this track is
+
+Building a standalone web dashboard **inside the `gru-analytics-db` container** (not
+`gru-server`) that visualizes Copilot session/cost data stored in PostgreSQL. It is a
+pixel-faithful clone of a reference "Copilot Cost" dashboard
+(`sensio.ghe.com/vladimir-nosenko/vladimir-nosenko.sensio.ghe.com`), remapped to our
+vocabulary: **projects** (was "pipelines") and **sessions** (was "run-items").
+
+### Status — dashboard clone functionally complete, but schema is next to be redesigned
+
+Three iterations landed on `docker/analytics-db/web_server.py` (full rewrite → CSS bug fix →
+tilde/confidence fix). CSS/JS/element IDs are now byte-identical to the reference except for
+injected data. **However, the user has now asked to redesign the underlying DB schema from
+scratch next session** to properly support these dashboards, rather than continuing to bolt
+fixes onto the `pipeline_runs`/`pipeline_run_items`/`projects` schema inherited from the
+pipeline-engine data model.
+
+Latest commits on this branch:
+- `7f34c5e` fix: replicate reference's tilde-prefix cost convention and 3-tier confidence
+- `7ad834f` fix: remove duplicate nested `<style>` tags breaking dashboard CSS
+- `f96b494` feat: rebuild analytics dashboard to match reference Copilot Cost UI/UX
+- `01478ac` feat: analytics dashboard built into gru-analytics-db (not gru-server)
+
+### Issue Status
+
+No GHE project board. Work tracked via commits.
+
+### Needs Human
+
+None currently blocking. **Note:** remote is `github.com/mrtuborg/docker-gru-env` — per
+policy, do not push/open PRs on this branch without explicit human approval in-session.
+
+### Device State
+
+- `gru-analytics-db`: running, DB port `127.0.0.1:9399`, web UI port `9398`
+  (`http://localhost:9398/`), image rebuilt+recreated 3× this session, data preserved
+  each time (949 `pipeline_run_items`, 2 `projects` rows).
+- `gru-server-dev`: unaffected, still healthy on port 9400.
+- Run/rebuild from **this worktree** (not the main checkout — its `gru-db` script lacks
+  `build` support):
+  ```bash
+  cd /Users/vn/ws/platform-development/copilot-worktrees/docker-gru-env-server/vladimir-nosenko-improved-spork
+  ./gru-db build
+  docker rm -f gru-analytics-db && ./gru-db start --port 9399 --web-port 9398
+  ```
+
+### Next Action
+
+**Redesign the analytics DB schema from scratch** (explicit user request for next session),
+purpose-built for these dashboards instead of reusing pipeline-engine tables:
+
+1. Review what the reference dashboard actually needs per page (index: projects list +
+   aggregates + 2 pie charts; project page: summary stats, monthly/weekly/yearly combo +
+   token charts, per-model stats + 3 pies, top-10-issues ×2, by-repo/branch table, session
+   timeline, GitHub-style heatmap) — use `docker/analytics-db/web_server.py`'s `fetch_index()`
+   /`fetch_project()` as the authoritative list of required fields/aggregates.
+2. Design a clean schema (proposal: `projects`, `sessions` as first-class tables instead of
+   `pipeline_runs`/`pipeline_run_items` repurposed via `002-projects.sql`) with explicit
+   columns for: cost coverage semantics (needed for the tilde/confidence-tier logic — see
+   lessons below), issue/repo/branch attribution, token breakdowns, and model usage —
+   designed so confidence tiers (exact/low/unknown) and partial-cost aggregation don't need
+   ad-hoc `items_with_cost`/`items_with_premium` COUNT() gymnastics in every query.
+   Consider a `session_models` child table (one row per model used in a session) instead of
+   only per-session single top-model, to support the reference's multi-model share display
+   (`Sonnet 4.6 78% / Opus 4.6 13% / Haiku 4.5 4%`) which we currently simplify to one model.
+3. Write a migration path from the current schema (`pipeline_runs`, `pipeline_run_items`,
+   `projects`, `gru-migrate-analytics` importer) to the new one — do not lose the 949
+   already-imported items.
+4. Update `analytics_connector.py` DDL and `gru-migrate-analytics` to target the new schema.
+5. Rewrite `fetch_index()`/`fetch_project()` SQL against the new schema; verify dashboard
+   output is unchanged (byte-diff against `/tmp/ref-dashboard2` if still present, or re-clone
+   the reference repo).
+6. Rebuild/redeploy `gru-analytics-db`, verify data integrity, commit.
+
+Key files for next session:
+- `docker/analytics-db/web_server.py` — dashboard server; `fetch_index()`/`fetch_project()`
+  define exactly what data shapes the new schema must support
+- `docker/analytics-db/initdb/002-projects.sql` — current (to-be-replaced) schema addition
+- `server/connectors/analytics_connector.py` — mirrors the DDL, needs updating in lockstep
+- `gru-migrate-analytics` — importer script, needs updating for new schema
+- `gru-db` — container management (`build`/`start --port --web-port`) — use the worktree's
+  copy, not the main checkout's older version
+
+---
+
 ## Shared
 
 ### Connector naming convention
