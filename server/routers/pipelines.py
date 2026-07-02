@@ -270,8 +270,9 @@ async def get_status(pipeline_id: str, request: Request):
     live = engine.live_state(pipeline_id)
     queued = live["queued"]
 
-    # When engine is stopped/paused, still fetch from GitHub so Boards shows current state
-    if not queued and engine.status(pipeline_id) in ("stopped", "paused"):
+    # When engine has no live queue (stopped, paused, or sleeping between polls),
+    # fall back to a fresh GitHub query so Boards always shows current board state.
+    if not queued and not live["active"]:
         try:
             from ..vault import load_secret  # noqa: PLC0415
             plugin_id = p.get("plugin_id", "")
