@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# gru-migrate-analytics — migrate pipeline run history from SQLite → PostgreSQL analytics DB
+#
+# Usage:
+#   ./gru-migrate-analytics                  # auto-detect analytics connector from server DB
+#   ./gru-migrate-analytics --pg-url URL     # explicit PostgreSQL URL
+#   ./gru-migrate-analytics --dry-run        # preview without writing
+#
+# Runs inside gru-server-dev where asyncpg is already installed.
+
+set -euo pipefail
+
+CONTAINER="gru-server-dev"
+PG_URL=""
+DRY_RUN="0"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --pg-url)  PG_URL="$2"; shift 2 ;;
+    --dry-run) DRY_RUN="1"; shift ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+if ! docker inspect "$CONTAINER" &>/dev/null; then
+  echo "✗ Container $CONTAINER is not running" >&2
+  exit 1
+fi
+
+cat > /tmp/_gru_migrate.py << 'PYEOF'
+import sqlite3, asyncio, json, sys
+from datetime import datetime
+
+SQLITE_PATH = "/data/server.db"
+PG_URL_ARG  = sys.argv[1]   # "" = auto-detect
+DRY_RUN     = sys.argv[2] == "1"
+
+def parse_dt(s):
+    if not s:
+        return None
+    return datetime.fromisoformat(s.replace("Z", "+00:00"))
+
+async def main():
+    import asyncpg
+
+    conn_sq = sqlite3.connect(SQLITE_PATH)
+
+    if PG_URL_ARG:
+        url = PG_URL_ARG
+    else:
+        row = conn_sq.execute(
+            "SELECT config FROM plugins WHERE plugin_type='analytics' LIMIT 1"
+        ).fetchone()
+        if not row:
+            print("No analytics connector found in server DB.")
+            print("Add one via the Connectors page, or pass --pg-url URL")
+            sys.exit(1)
+        cfg  = json.loads(row[0])
+        host = cfg.get("host", "")
+        if host in ("localhost", "127.0.0.1", "::1"):
+            host = "host.docker.internal"
+        port = int(cfg.get("port", 5432))
+        db   = cfg.get("database", "gru_analytics")
+        user = cfg.get("user", "gru")
+        url  = f"postgresql://{user}@{host}:{port}/{db}"
+
+    print(f"  Source : {SQLITE_PATH}")
+    print(f"  Target : {url}")
+    if DRY_RUN:
+        print("  Mode   : DRY RUN - nothing will be written")
+    print()
+
+    run_cols  = [d[1] for d in conn_sq.execute("PRAGMA table_info(pipeline_runs)").fetchall()]
+    item_cols = [d[1] for d in conn_sq.execute("PRAGMA table_info(pipeline_run_items)").fetchall()]
+    runs  = [dict(zip(run_cols,  r)) for r in conn_sq.execute("SELECT * FROM pipeline_runs").fetchall()]
+    items = [dict(zip(item_cols, r)) for r in conn_sq.execute("SELECT * FROM pipeline_run_items").fetchall()]
+    print(f"  Found  : {len(runs)} runs, {len(items)} run-items")
+
+    if DRY_RUN:
+        for r in runs[:5]:
+            print(f"    run  {r['id']}  {r['pipeline_id']}  {r['status']}  {r['started_at']}")
+        for i in items[:5]:
+            print(f"    item {i['run_id']}  #{i['issue_number']}  {i['stage']}  {i['status']}")
+        print("\n  (dry-run - nothing written)")
+        return
+
+    pg = await asyncpg.connect(url)
+
+    ok_runs = 0
+    for r in runs:
+        try:
+            await pg.execute("""
+                INSERT INTO pipeline_runs(id,pipeline_id,started_at,ended_at,status,
+                    issues_processed,issues_succeeded,issues_failed,issues_skipped,model_used)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+                ON CONFLICT(id) DO NOTHING
+            """, r['id'], r['pipeline_id'],
+                parse_dt(r['started_at']), parse_dt(r['ended_at']),
+                r['status'], r['issues_processed'], r['issues_succeeded'],
+                r['issues_failed'], r['issues_skipped'], r['model_used'])
+            ok_runs += 1
+        except Exception as e:
+            print(f"  ERR run  {r['id']}: {e}")
+
+    ok_items = 0
+    for r in items:
+        try:
+            await pg.execute("""
+                INSERT INTO pipeline_run_items(run_id,issue_number,issue_repo,issue_title,
+                    stage,status,started_at,ended_at,duration_s,model,
+                    cost_usd,session_id,error_message)
+                VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+                ON CONFLICT(run_id,issue_number,stage) DO NOTHING
+            """, r['run_id'], r['issue_number'], r['issue_repo'], r.get('issue_title'),
+                r['stage'], r['status'],
+                parse_dt(r['started_at']), parse_dt(r['ended_at']),
+                r['duration_s'], r.get('model'), r.get('cost_usd'),
+                r.get('session_id'), r.get('error_message'))
+            ok_items += 1
+        except Exception as e:
+            print(f"  ERR item {r['run_id']}/#{r['issue_number']}/{r['stage']}: {e}")
+
+    pg_runs  = await pg.fetchval("SELECT count(*) FROM pipeline_runs")
+    pg_items = await pg.fetchval("SELECT count(*) FROM pipeline_run_items")
+    await pg.close()
+
+    print(f"  Inserted : {ok_runs}/{len(runs)} runs, {ok_items}/{len(items)} items")
+    print(f"  PG total : {pg_runs} runs, {pg_items} items")
+    print("Migration complete")
+
+asyncio.run(main())
+PYEOF
+
+docker cp /tmp/_gru_migrate.py "$CONTAINER":/tmp/_gru_migrate.py
+docker exec "$CONTAINER" python3 /tmp/_gru_migrate.py "$PG_URL" "$DRY_RUN"
