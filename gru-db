@@ -64,6 +64,12 @@ do_start() {
   fi
 
   if container_exists; then
+    if [[ -n "$HOST_PORT" ]]; then
+      echo "⚠  Container already exists — port mappings are fixed at creation time."
+      echo "   To expose port $HOST_PORT, recreate the container:"
+      echo "   ./gru-db fresh --port $HOST_PORT"
+      exit 1
+    fi
     echo "▶ Starting $CONTAINER …"
     docker start "$CONTAINER"
     docker network connect "$NETWORK" "$CONTAINER" 2>/dev/null || true
