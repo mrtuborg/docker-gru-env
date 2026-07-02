@@ -29,30 +29,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ── defaults for host mode ─────────────────────────────────────────────────────
-if [[ "$FROM" == "host" ]]; then
-  DEFAULT_SQLITE="${HOME}/.copilot/session-state/../../../data/server.db"
-  DEFAULT_SESSION_STATE="${HOME}/.copilot/session-state"
+if [[ "$FROM" == "host" && -z "$SQLITE_OVERRIDE" ]]; then
+  for c in "${HOME}/.gru/server.db" "/tmp/server.db"; do
+    [[ -f "$c" ]] && SQLITE_OVERRIDE="$c" && break
+  done
   if [[ -z "$SQLITE_OVERRIDE" ]]; then
-    # Try to find server.db on host; prompt if not found
-    CANDIDATES=(
-      "${HOME}/.gru/server.db"
-      "/tmp/server.db"
-    )
-    for c in "${CANDIDATES[@]}"; do
-      [[ -f "$c" ]] && SQLITE_OVERRIDE="$c" && break
-    done
-    if [[ -z "$SQLITE_OVERRIDE" ]]; then
-      echo "⚠  Could not find server.db on the host."
-      echo "   Copy it from the container first:"
-      echo "     docker cp gru-server-dev:/data/server.db /tmp/server.db"
-      echo "   Then re-run with --sqlite /tmp/server.db"
-      exit 1
-    fi
-  fi
-else
-  # Container mode — verify it exists
-  if ! docker inspect "$FROM" &>/dev/null; then
-    echo "✗ Container '$FROM' not found or not running" >&2
+    echo "⚠  Could not find server.db on the host. Pass --sqlite PATH to specify it."
+    echo "   Or copy it from the container: docker cp gru-server-dev:/data/server.db /tmp/server.db"
     exit 1
   fi
 fi
@@ -104,10 +87,11 @@ def find_shutdown_for_window(started_at_str, ended_at_str):
     return None, {}
 
 async def main():
-    import asyncpg
     conn_sq = sqlite3.connect(SQLITE_PATH)
 
-    if PG_URL_ARG:
+    if DRY_RUN:
+        url = PG_URL_ARG or "(not needed for dry-run)"
+    elif PG_URL_ARG:
         url = PG_URL_ARG
     else:
         row = conn_sq.execute(
@@ -143,7 +127,7 @@ async def main():
         print("\n  (dry-run - nothing written)")
         return
 
-    pg = await asyncpg.connect(url)
+    pg = await __import__('asyncpg').connect(url)
     ok_runs = 0
     for r in runs:
         try:
@@ -215,14 +199,42 @@ asyncio.run(main())
 PYEOF
 
 # ── dispatch: container vs host ────────────────────────────────────────────────
+# ── dispatch: container vs host ────────────────────────────────────────────────
 if [[ "$FROM" == "host" ]]; then
-  SESSION_STATE="${HOME}/.copilot/session-state"
-  echo "▶ Migrating from HOST  ($SQLITE_OVERRIDE)"
-  python3 /tmp/_gru_migrate.py "$SQLITE_OVERRIDE" "$PG_URL" "$DRY_RUN" "$SESSION_STATE"
+  HOST_SQLITE="${SQLITE_OVERRIDE}"
+  HOST_SESSION_STATE="${HOME}/.copilot/session-state"
+
+  # For host: resolve PG URL to localhost (port exposed by gru-db start --port)
+  # Dry-run needs no asyncpg — only reads local files.
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "▶ Scanning HOST (dry-run — no asyncpg needed)"
+    python3 /tmp/_gru_migrate.py "$HOST_SQLITE" "$PG_URL" "$DRY_RUN" "$HOST_SESSION_STATE"
+  else
+    # Check asyncpg available locally; install if missing
+    if ! python3 -c "import asyncpg" 2>/dev/null; then
+      echo "  asyncpg not found locally — installing …"
+      pip3 install --user --quiet asyncpg
+    fi
+    # Default PG URL for host: use localhost + exposed port from gru-analytics-db
+    if [[ -z "$PG_URL" ]]; then
+      HOST_PG_PORT=$(docker inspect --format \
+        '{{range $p,$v := .HostConfig.PortBindings}}{{if $v}}{{(index $v 0).HostPort}}{{end}}{{end}}' \
+        gru-analytics-db 2>/dev/null || true)
+      if [[ -z "$HOST_PG_PORT" ]]; then
+        echo "⚠  gru-analytics-db has no port exposed to host."
+        echo "   Start it with: ./gru-db start --port 9399"
+        echo "   Or pass: --pg-url postgresql://gru@localhost:PORT/gru_analytics"
+        exit 1
+      fi
+      PG_URL="postgresql://gru@localhost:${HOST_PG_PORT}/gru_analytics"
+    fi
+    echo "▶ Migrating from HOST"
+    python3 /tmp/_gru_migrate.py "$HOST_SQLITE" "$PG_URL" "$DRY_RUN" "$HOST_SESSION_STATE"
+  fi
 else
   SQLITE_PATH="${SQLITE_OVERRIDE:-/data/server.db}"
-  SESSION_STATE="/root/.copilot/session-state"
   echo "▶ Migrating from container: $FROM"
   docker cp /tmp/_gru_migrate.py "$FROM":/tmp/_gru_migrate.py
-  docker exec "$FROM" python3 /tmp/_gru_migrate.py "$SQLITE_PATH" "$PG_URL" "$DRY_RUN" "$SESSION_STATE"
+  docker exec "$FROM" python3 /tmp/_gru_migrate.py \
+    "$SQLITE_PATH" "$PG_URL" "$DRY_RUN" "/root/.copilot/session-state"
 fi
