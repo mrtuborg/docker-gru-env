@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
@@ -197,7 +197,7 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
   })
 
   // Measure card positions and compute SVG arrow paths
-  useEffect(() => {
+  const measureArrows = useCallback(() => {
     const container = containerRef.current
     if (!container) return
     const containerRect = container.getBoundingClientRect()
@@ -211,7 +211,6 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
     const maxRight = Math.max(...rects.filter(Boolean).map(r => r!.x + r!.w), 0)
     const maxBottom = Math.max(...rects.filter(Boolean).map(r => r!.y + r!.h), 0)
 
-    // Count how many arcs go above vs below per from-card to avoid overlap
     const computed = edges.map(e => {
       const fr = rects[e.from]
       const tr = rects[e.to]
@@ -220,13 +219,11 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
       const isForward = e.to > e.from
       const isAdjacent = Math.abs(e.to - e.from) === 1
 
-      // Start: right-center of from card; End: left-center of to card
       const x1 = fr.x + fr.w
       const y1 = fr.y + fr.h / 2
       const x2 = tr.x
       const y2 = tr.y + tr.h / 2
 
-      // Arc amount: 0 for adjacent, curve up/down for skip
       const skip = Math.abs(e.to - e.from) - 1
       const arc = isAdjacent ? 0 : (isForward ? -(skip * 30 + 20) : (skip * 30 + 20))
 
@@ -235,7 +232,20 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
 
     setSvgSize({ w: maxRight + 20, h: maxBottom + Math.abs(Math.min(0, ...computed.map(a => a.arc))) + 40 })
     setArrows(computed)
-  }, [stages.length, stages.map(s => s.on_success + s.on_failure).join(',')])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edges.map(e => `${e.from}-${e.to}-${e.type}`).join(',')])
+
+  // Use layout effect + ResizeObserver so arrows re-measure when card heights
+  // change (agent data loads, lint errors appear, content changes).
+  useLayoutEffect(() => {
+    measureArrows()
+    const container = containerRef.current
+    if (!container) return
+    const ro = new ResizeObserver(measureArrows)
+    ro.observe(container)
+    cardRefs.current.forEach(el => { if (el) ro.observe(el) })
+    return () => ro.disconnect()
+  }, [measureArrows])
 
   const svgPaddingTop = Math.abs(Math.min(0, ...arrows.map(a => a.arc), 0)) + 10
 
@@ -854,7 +864,21 @@ export default function PipelineEditor() {
     setPipeline(prev => {
       if (!prev) return prev
       const stages = [...prev.stages]
+      const oldCol = stages[idx].column
       stages[idx] = { ...stages[idx], ...patch }
+      // If the column name changed, cascade the rename to all on_success/on_failure/on_timeout refs
+      if (patch.column !== undefined && patch.column !== oldCol) {
+        const newCol = patch.column
+        for (let j = 0; j < stages.length; j++) {
+          if (j === idx) continue
+          stages[j] = {
+            ...stages[j],
+            on_success: stages[j].on_success === oldCol ? newCol : stages[j].on_success,
+            on_failure: stages[j].on_failure === oldCol ? newCol : stages[j].on_failure,
+            on_timeout: stages[j].on_timeout === oldCol ? newCol : stages[j].on_timeout,
+          }
+        }
+      }
       return { ...prev, stages }
     })
     setDirty(true)
@@ -1487,36 +1511,32 @@ export default function PipelineEditor() {
                   {/* Transitions (advanced) */}
                   <div className="divider"/>
                   <div className="section-label">Transitions</div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:16 }}>
                     <div>
-                      <label className="form-label">On Success</label>
+                      <label className="form-label">On Success →</label>
                       <select className="form-input" value={sel.on_success}
                         onChange={e => updateStage(selectedStage, { on_success: e.target.value })}>
-                        <option value="">(next stage)</option>
+                        <option value="">(no automatic move)</option>
                         {pipeline.stages.map((s, i) => i !== selectedStage && (
                           <option key={s.column} value={s.column}>{s.column}</option>
                         ))}
                       </select>
+                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+                        Stage to move issue to after a successful session.
+                      </p>
                     </div>
                     <div>
-                      <label className="form-label">On Failure</label>
+                      <label className="form-label">On Failure →</label>
                       <select className="form-input" value={sel.on_failure}
                         onChange={e => updateStage(selectedStage, { on_failure: e.target.value })}>
-                        <option value="">(stay)</option>
+                        <option value="">(stay in current stage)</option>
                         {pipeline.stages.map((s, i) => i !== selectedStage && (
                           <option key={s.column} value={s.column}>{s.column}</option>
                         ))}
                       </select>
-                    </div>
-                    <div>
-                      <label className="form-label">On Timeout</label>
-                      <select className="form-input" value={sel.on_timeout}
-                        onChange={e => updateStage(selectedStage, { on_timeout: e.target.value })}>
-                        <option value="">(stay + label)</option>
-                        {pipeline.stages.map((s, i) => i !== selectedStage && (
-                          <option key={s.column} value={s.column}>{s.column}</option>
-                        ))}
-                      </select>
+                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+                        Stage to move issue to after a failed session (leave blank to retry in-place).
+                      </p>
                     </div>
                   </div>
 
