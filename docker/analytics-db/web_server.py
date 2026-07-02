@@ -136,7 +136,6 @@ def fmt_tokens(v) -> str:
     return str(int(v))
 
 INDEX_CSS = r"""
-<style>
   :root {
     --bg: #0a0e14; --surface: #111820; --surface2: #161d27;
     --border: #1f2d3d; --text: #cdd9e5; --muted: #636e7b;
@@ -217,7 +216,6 @@ INDEX_CSS = r"""
     color: var(--muted); margin-bottom: 12px; }
   .pie-chart-wrap { width: 100%; min-height: 200px; }
   .pie-chart-wrap svg { display: block; width: 100%; }
-</style>
 """
 
 INDEX_JS = r"""
@@ -589,7 +587,6 @@ __PROJECT_CARDS__
 """
 
 PROJECT_CSS = r"""
-<style>
   :root {
     --bg: #0a0e14; --surface: #111820; --surface2: #161d27;
     --border: #1f2d3d; --text: #cdd9e5; --muted: #636e7b;
@@ -749,7 +746,6 @@ PROJECT_CSS = r"""
   /* ── Pie charts ── */
   .pie-chart-wrap { width: 100%; min-height: 200px; }
   .pie-chart-wrap svg { display: block; width: 100%; }
-</style>
 """
 
 PROJECT_JS = r"""
