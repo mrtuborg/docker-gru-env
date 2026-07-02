@@ -588,28 +588,39 @@ async def get_pipeline_run_items(run_id: str) -> list[dict]:
 
 
 async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
-    """Return all run items for a pipeline with aggregated summary.
+    """Return run items for a pipeline with aggregated summary.
 
-    days=0 means no time filter (all time).
+    days=0 means no time filter (all time). Summary is computed from the DB
+    (not from the truncated session list) to stay accurate with large histories.
     """
+    days = max(0, days)  # reject negatives
     async with aiosqlite.connect(get_db_path()) as db:
         db.row_factory = aiosqlite.Row
 
-        time_filter = "" if days == 0 else f"AND ri.started_at >= datetime('now', '-{days} days')"
+        # Parameterize the time modifier to avoid string interpolation
+        time_params: tuple = (pipeline_id,)
+        time_clause = ""
+        if days > 0:
+            time_clause = "AND ri.started_at >= datetime('now', ?)"
+            time_params = (pipeline_id, f"-{days} days")
 
-        # Flat session list
+        # ── Aggregate totals from DB (accurate over full history) ─────────────
         async with db.execute(
-            f"""SELECT ri.run_id, ri.issue_number, ri.issue_repo, ri.issue_title,
-                       ri.stage, ri.status, ri.started_at, ri.ended_at,
-                       ri.duration_s, ri.model, ri.cost_usd, ri.session_id, ri.error_message
+            f"""SELECT
+                       COUNT(*) as total,
+                       SUM(CASE WHEN ri.status IN ('success','completed','done') THEN 1 ELSE 0 END) as succeeded,
+                       SUM(ri.cost_usd) as total_cost_usd,
+                       AVG(ri.cost_usd) as avg_cost_usd,
+                       AVG(ri.duration_s) as avg_duration_s
                 FROM pipeline_run_items ri
                 JOIN pipeline_runs pr ON ri.run_id = pr.id
-                WHERE pr.pipeline_id = ? {time_filter}
-                ORDER BY ri.started_at DESC
-                LIMIT 1000""",
-            (pipeline_id,),
+                WHERE pr.pipeline_id = ? {time_clause}""",
+            time_params,
         ) as cur:
-            sessions = [dict(r) async for r in cur]
+            agg = dict(await cur.fetchone() or {})
+
+        total = agg.get("total") or 0
+        succeeded = agg.get("succeeded") or 0
 
         # Aggregate by stage
         async with db.execute(
@@ -620,10 +631,10 @@ async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
                        AVG(ri.duration_s) as avg_duration_s
                 FROM pipeline_run_items ri
                 JOIN pipeline_runs pr ON ri.run_id = pr.id
-                WHERE pr.pipeline_id = ? {time_filter}
+                WHERE pr.pipeline_id = ? {time_clause}
                 GROUP BY ri.stage
                 ORDER BY count DESC""",
-            (pipeline_id,),
+            time_params,
         ) as cur:
             by_stage = {r["stage"]: dict(r) async for r in cur}
 
@@ -635,17 +646,26 @@ async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
                        AVG(ri.duration_s) as avg_duration_s
                 FROM pipeline_run_items ri
                 JOIN pipeline_runs pr ON ri.run_id = pr.id
-                WHERE pr.pipeline_id = ? {time_filter}
+                WHERE pr.pipeline_id = ? {time_clause}
                 GROUP BY ri.model
                 ORDER BY count DESC""",
-            (pipeline_id,),
+            time_params,
         ) as cur:
             by_model = {r["model"]: dict(r) async for r in cur}
 
-        total = len(sessions)
-        succeeded = sum(1 for s in sessions if s["status"] in ("success", "completed", "done"))
-        total_cost = sum(s["cost_usd"] or 0 for s in sessions)
-        durations = [s["duration_s"] for s in sessions if s["duration_s"] is not None]
+        # ── Flat session list (display only, capped at 1000 rows) ─────────────
+        async with db.execute(
+            f"""SELECT ri.run_id, ri.issue_number, ri.issue_repo, ri.issue_title,
+                       ri.stage, ri.status, ri.started_at, ri.ended_at,
+                       ri.duration_s, ri.model, ri.cost_usd, ri.session_id, ri.error_message
+                FROM pipeline_run_items ri
+                JOIN pipeline_runs pr ON ri.run_id = pr.id
+                WHERE pr.pipeline_id = ? {time_clause}
+                ORDER BY ri.started_at DESC
+                LIMIT 1000""",
+            time_params,
+        ) as cur:
+            sessions = [dict(r) async for r in cur]
 
         return {
             "summary": {
@@ -653,9 +673,9 @@ async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
                 "succeeded": succeeded,
                 "failed": total - succeeded,
                 "success_rate": round(succeeded / total * 100, 1) if total else 0.0,
-                "total_cost_usd": round(total_cost, 6),
-                "avg_cost_usd": round(total_cost / total, 6) if total else 0.0,
-                "avg_duration_s": round(sum(durations) / len(durations), 1) if durations else 0.0,
+                "total_cost_usd": round(agg.get("total_cost_usd") or 0, 6),
+                "avg_cost_usd": round(agg.get("avg_cost_usd") or 0, 6),
+                "avg_duration_s": round(agg.get("avg_duration_s") or 0, 1),
                 "by_stage": by_stage,
                 "by_model": by_model,
             },

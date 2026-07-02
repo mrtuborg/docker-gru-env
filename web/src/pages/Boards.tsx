@@ -144,20 +144,21 @@ const LEVEL_STYLE: Record<string, { color: string; prefix: string }> = {
 
 function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: any | null }) {
   const [entries, setEntries] = useState<LogEntry[]>([])
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const esRef = useRef<EventSource | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)  // track whether user is near bottom
 
+  // SSE: connect only when there is an active session; disconnect when idle
   useEffect(() => {
-    // Open SSE connection for this pipeline
+    if (!active) return  // don't open SSE connection when nothing is running
+
     const es = new EventSource(`/api/pipelines/${pipelineId}/logs`)
-    esRef.current = es
 
     const handle = (e: MessageEvent, level: string) => {
       try {
         const d = JSON.parse(e.data)
         setEntries(prev => {
           const next = [...prev, { level, message: d.message || '', timestamp: d.timestamp || '', issue: d.issue, stage: d.stage }]
-          return next.slice(-600) // keep last 600 lines
+          return next.slice(-600)
         })
       } catch {}
     }
@@ -165,27 +166,35 @@ function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: a
     const levels = ['info', 'warn', 'error', 'success', 'session_log', 'warning']
     levels.forEach(lv => es.addEventListener(lv, (e: Event) => handle(e as MessageEvent, lv === 'warning' ? 'warn' : lv)))
 
-    return () => { es.close(); esRef.current = null }
-  }, [pipelineId])
+    return () => es.close()
+  }, [pipelineId, active?.number, active?.stage])  // reconnect when session changes
 
-  // Auto-scroll to bottom when entries change
+  // Auto-scroll only when already at bottom (respect user scroll position)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!atBottomRef.current) return
+    const el = scrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
   }, [entries.length])
 
-  // Clear log when a new active session starts
-  const prevActiveRef = useRef<number | null>(null)
+  // Reset log when a new session starts (keyed on issue + stage combo)
+  const sessionKey = active ? `${active.number}:${active.stage}` : null
+  const prevKeyRef = useRef<string | null>(null)
   useEffect(() => {
-    const issueNum = active?.number ?? null
-    if (issueNum !== prevActiveRef.current && issueNum !== null) {
+    if (sessionKey && sessionKey !== prevKeyRef.current) {
       setEntries([])
+      atBottomRef.current = true
     }
-    prevActiveRef.current = issueNum
-  }, [active?.number])
+    prevKeyRef.current = sessionKey
+  }, [sessionKey])
+
+  const handleScroll = () => {
+    const el = scrollRef.current
+    if (!el) return
+    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+  }
 
   if (!active && entries.length === 0) return null
 
-  // Filter: when active, show session_log + structured events; when idle show only structured
   const visible = active
     ? entries.slice(-300)
     : entries.filter(e => e.level !== 'session_log').slice(-100)
@@ -218,10 +227,11 @@ function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: a
       </div>
 
       {/* Log scroll area */}
-      <div style={{
-        height: 300, overflowY: 'auto', padding: '8px 0',
-        fontFamily: 'monospace', fontSize: 12,
-      }}>
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        style={{ height: 300, overflowY: 'auto', padding: '8px 0', fontFamily: 'monospace', fontSize: 12 }}
+      >
         {visible.length === 0 ? (
           <div style={{ color: 'var(--muted)', padding: '16px 14px', fontSize: 12 }}>
             Waiting for session output…
@@ -235,12 +245,9 @@ function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: a
               alignItems: 'flex-start',
               background: i % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--border) 20%, transparent)',
             }}>
-              {!isSessionLog && (
-                <span style={{ color: style.color, flexShrink: 0, fontSize: 11, marginTop: 1 }}>{style.prefix}</span>
-              )}
-              {isSessionLog && (
-                <span style={{ color: 'var(--muted)', flexShrink: 0, fontSize: 10, marginTop: 2, minWidth: 10 }}>›</span>
-              )}
+              <span style={{ color: isSessionLog ? 'var(--muted)' : style.color, flexShrink: 0, fontSize: isSessionLog ? 10 : 11, marginTop: isSessionLog ? 2 : 1, minWidth: 10 }}>
+                {style.prefix}
+              </span>
               <span style={{
                 color: isSessionLog ? 'var(--fg)' : style.color,
                 opacity: isSessionLog ? 0.85 : 1,
@@ -250,7 +257,6 @@ function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: a
             </div>
           )
         })}
-        <div ref={bottomRef} />
       </div>
     </div>
   )
