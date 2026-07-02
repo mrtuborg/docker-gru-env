@@ -209,10 +209,13 @@ import asyncio, json, sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-SESSION_STATE = Path(sys.argv[1])
+SESSION_STATE = Path(sys.argv[1]) if sys.argv[1] else Path("/dev/null")
 PG_URL_ARG    = sys.argv[2]
 DRY_RUN       = sys.argv[3] == "1"
-RUN_ID        = "host-sessions"  # synthetic pipeline run for all standalone sessions
+SOURCE_ID     = sys.argv[4] if len(sys.argv) > 4 else "host"
+MODE          = sys.argv[5] if len(sys.argv) > 5 else ""   # "--dump-json" | "--import-json"
+JSON_PATH     = sys.argv[6] if len(sys.argv) > 6 else ""
+RUN_ID        = f"{SOURCE_ID}-sessions"
 
 def parse_shutdown(events_file):
     """Return (session_id, shutdown_data) from events.jsonl, or (None, {})."""
@@ -245,7 +248,8 @@ def extract_tokens(sd):
         "reasoning":   unwrap(td.get("reasoning"))   or unwrap(td.get("reasoningTokens")),
     }
 
-async def main():
+
+def collect_sessions():
     sessions = []
     for d in SESSION_STATE.iterdir():
         if not d.is_dir(): continue
@@ -261,35 +265,18 @@ async def main():
             started_dt = datetime.fromisoformat(started_raw.replace("Z", "+00:00"))
         else:
             started_dt = None
-        ended_dt    = datetime.fromtimestamp(ended_ts, tz=timezone.utc)
-        duration_s  = (ended_dt - started_dt).total_seconds() if started_dt else None
+        ended_dt   = datetime.fromtimestamp(ended_ts, tz=timezone.utc)
+        duration_s = (ended_dt - started_dt).total_seconds() if started_dt else None
         sessions.append((sid, sd, started_dt, ended_dt, duration_s))
-
     sessions.sort(key=lambda x: x[2] or datetime.min.replace(tzinfo=timezone.utc))
-    print(f"  Session-state : {SESSION_STATE}")
-    print(f"  Sessions found: {len(sessions)} with shutdown data")
+    return sessions
 
-    if DRY_RUN:
-        for sid, sd, start, end, dur in sessions[-5:]:
-            td = extract_tokens(sd)
-            print(f"    {sid[:8]}  {sd.get('currentModel','?'):30s}  "
-                  f"nano_aiu={sd.get('totalNanoAiu')}  "
-                  f"prem={sd.get('totalPremiumRequests')}  "
-                  f"dur={int(dur or 0)}s")
-        print(f"\n  (showing last 5 — {len(sessions)} total)")
-        print("  (dry-run — nothing written)")
-        return
-
-    import asyncpg
-    pg = await asyncpg.connect(PG_URL_ARG)
-
-    # Upsert a synthetic pipeline_run to hang all host sessions under
+async def pg_insert(pg, sessions):
     await pg.execute("""
         INSERT INTO pipeline_runs(id, pipeline_id, started_at, status)
         VALUES($1, 'host', now(), 'completed')
         ON CONFLICT(id) DO NOTHING
     """, RUN_ID)
-
     ok = 0
     for i, (sid, sd, start, end, dur) in enumerate(sessions):
         td = extract_tokens(sd)
@@ -314,7 +301,7 @@ async def main():
                     shutdown_data    = COALESCE(EXCLUDED.shutdown_data,    pipeline_run_items.shutdown_data)
             """,
             RUN_ID, i, "host", "standalone", "success",
-            start, end, duration_s if duration_s is not None else dur,
+            start, end, dur,
             sd.get("currentModel"), sid,
             sd.get("totalNanoAiu"), sd.get("totalPremiumRequests"),
             td["input"], td["output"], td["cache_read"], td["cache_write"],
@@ -327,16 +314,68 @@ async def main():
             ok += 1
         except Exception as e:
             print(f"  ERR {sid[:8]}: {e}")
-
-    # Update run counters
     await pg.execute("""
-        UPDATE pipeline_runs SET
-            issues_processed = $1, issues_succeeded = $1, ended_at = now()
-        WHERE id = $2
+        UPDATE pipeline_runs SET issues_processed=$1, issues_succeeded=$1, ended_at=now()
+        WHERE id=$2
     """, ok, RUN_ID)
+    return ok
 
+async def main():
+    if MODE == "--import-json":
+        # Import from pre-dumped JSON (used when source container lacks asyncpg)
+        # Translate loopback in URL since we run inside a container
+        pg_url = PG_URL_ARG
+        for lb in ("localhost", "127.0.0.1", "::1"):
+            if f"@{lb}:" in pg_url:
+                pg_url = pg_url.replace(f"@{lb}:", "@host.docker.internal:", 1)
+                break
+        rows = json.loads(Path(JSON_PATH).read_text())
+        sessions = []
+        for r in rows:
+            sid, sd = r["sid"], r["sd"]
+            start = datetime.fromisoformat(r["start"]) if r["start"] else None
+            end   = datetime.fromisoformat(r["end"])
+            sessions.append((sid, sd, start, end, r["dur"]))
+        print(f"  Source  : {JSON_PATH} ({len(sessions)} sessions from {SOURCE_ID})")
+        import asyncpg
+        pg = await asyncpg.connect(pg_url)
+        ok = await pg_insert(pg, sessions)
+        pg_items = await pg.fetchval(
+            "SELECT count(*) FROM pipeline_run_items WHERE run_id=$1", RUN_ID)
+        await pg.close()
+        print(f"  Inserted: {ok}/{len(sessions)} sessions")
+        print(f"  PG total: {pg_items} standalone sessions under {RUN_ID}")
+        print("Import complete")
+        return
+
+    sessions = collect_sessions()
+    print(f"  Session-state : {SESSION_STATE}")
+    print(f"  Sessions found: {len(sessions)} with shutdown data")
+
+    if DRY_RUN:
+        for sid, sd, start, end, dur in sessions[-5:]:
+            print(f"    {sid[:8]}  {sd.get('currentModel','?'):30s}  "
+                  f"nano_aiu={sd.get('totalNanoAiu')}  "
+                  f"prem={sd.get('totalPremiumRequests')}  "
+                  f"dur={int(dur or 0)}s")
+        print(f"\n  (showing last 5 — {len(sessions)} total)")
+        print("  (dry-run — nothing written)")
+        return
+
+    if MODE == "--dump-json":
+        rows = [{"sid": sid, "sd": sd,
+                 "start": start.isoformat() if start else None,
+                 "end": end.isoformat(), "dur": dur}
+                for sid, sd, start, end, dur in sessions]
+        Path(JSON_PATH).write_text(json.dumps(rows))
+        print(f"  Dumped {len(rows)} sessions to {JSON_PATH}")
+        return
+
+    import asyncpg
+    pg = await asyncpg.connect(PG_URL_ARG)
+    ok = await pg_insert(pg, sessions)
     pg_items = await pg.fetchval(
-        "SELECT count(*) FROM pipeline_run_items WHERE run_id = $1", RUN_ID)
+        "SELECT count(*) FROM pipeline_run_items WHERE run_id=$1", RUN_ID)
     await pg.close()
     print(f"  Inserted : {ok}/{len(sessions)} sessions")
     print(f"  PG total : {pg_items} standalone sessions")
@@ -357,7 +396,7 @@ if [[ "$FROM" == "host" ]]; then
     python3 /tmp/_gru_migrate.py "$HOST_SQLITE" "$PG_URL" "$DRY_RUN" "$HOST_SESSION_STATE"
   elif [[ "$DRY_RUN" == "1" && "$SCAN_SESSIONS" == "1" ]]; then
     echo "▶ Scanning host sessions (dry-run — no asyncpg needed)"
-    python3 /tmp/_gru_scan_sessions.py "$HOST_SESSION_STATE" "$PG_URL" "$DRY_RUN"
+    python3 /tmp/_gru_scan_sessions.py "$HOST_SESSION_STATE" "$PG_URL" "$DRY_RUN" "host"
   else
     # Check asyncpg available locally; install if missing
     if ! python3 -c "import asyncpg" 2>/dev/null; then
@@ -379,7 +418,7 @@ if [[ "$FROM" == "host" ]]; then
     fi
     if [[ "$SCAN_SESSIONS" == "1" ]]; then
       echo "▶ Importing standalone host sessions → PostgreSQL"
-      python3 /tmp/_gru_scan_sessions.py "$HOST_SESSION_STATE" "$PG_URL" "$DRY_RUN"
+      python3 /tmp/_gru_scan_sessions.py "$HOST_SESSION_STATE" "$PG_URL" "$DRY_RUN" "host"
     else
       echo "▶ Migrating pipeline runs from HOST"
       python3 /tmp/_gru_migrate.py "$HOST_SQLITE" "$PG_URL" "$DRY_RUN" "$HOST_SESSION_STATE"
@@ -387,15 +426,31 @@ if [[ "$FROM" == "host" ]]; then
   fi
 else
   SQLITE_PATH="${SQLITE_OVERRIDE:-/data/server.db}"
+  # Default PG URL for container: use Docker network name (no exposed port needed)
+  CONTAINER_PG_URL="${PG_URL:-postgresql://gru@gru-analytics-db:5432/gru_analytics}"
   if [[ "$SCAN_SESSIONS" == "1" ]]; then
     echo "▶ Importing standalone sessions from container: $FROM"
     docker cp /tmp/_gru_scan_sessions.py "$FROM":/tmp/_gru_scan_sessions.py
-    docker exec "$FROM" python3 /tmp/_gru_scan_sessions.py \
-      "/root/.copilot/session-state" "$PG_URL" "$DRY_RUN"
+    # Check if target container has asyncpg; if not, dump to JSON and import via gru-server-dev
+    if docker exec "$FROM" python3 -c "import asyncpg" 2>/dev/null; then
+      docker exec "$FROM" python3 /tmp/_gru_scan_sessions.py \
+        "/root/.copilot/session-state" "$CONTAINER_PG_URL" "$DRY_RUN" "$FROM"
+    else
+      echo "  asyncpg not in $FROM — scanning to JSON, then importing via gru-server-dev"
+      docker exec "$FROM" python3 /tmp/_gru_scan_sessions.py \
+        "/root/.copilot/session-state" "" "$DRY_RUN" "$FROM" "--dump-json" "/tmp/_sessions_dump.json"
+      if [[ "$DRY_RUN" == "0" ]]; then
+        docker cp "$FROM":/tmp/_sessions_dump.json /tmp/_sessions_dump.json
+        docker cp /tmp/_sessions_dump.json gru-server-dev:/tmp/_sessions_dump.json
+        docker cp /tmp/_gru_scan_sessions.py gru-server-dev:/tmp/_gru_scan_sessions.py
+        docker exec gru-server-dev python3 /tmp/_gru_scan_sessions.py \
+          "" "$CONTAINER_PG_URL" "0" "$FROM" "--import-json" "/tmp/_sessions_dump.json"
+      fi
+    fi
   else
     echo "▶ Migrating pipeline runs from container: $FROM"
     docker cp /tmp/_gru_migrate.py "$FROM":/tmp/_gru_migrate.py
     docker exec "$FROM" python3 /tmp/_gru_migrate.py \
-      "$SQLITE_PATH" "$PG_URL" "$DRY_RUN" "/root/.copilot/session-state"
+      "$SQLITE_PATH" "$CONTAINER_PG_URL" "$DRY_RUN" "/root/.copilot/session-state"
   fi
 fi
