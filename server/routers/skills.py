@@ -1,4 +1,4 @@
-"""Skills router — read/write skill files from ~/.copilot/skills/ and /workspace/skills/."""
+"""Skills router — read/write skill files from ~/.copilot/skills/, /workspace/skills/, and /app/skills/."""
 from __future__ import annotations
 
 import io
@@ -15,8 +15,10 @@ router = APIRouter()
 
 # Writable skills dir (installed into Copilot CLI's data home)
 _SKILLS_HOME = Path(os.environ.get("COPILOT_DATA_HOME", Path.home() / ".copilot")) / "skills"
-# Read-only workspace skills (mounted from host)
+# Read-only workspace skills (mounted from host — optional)
 _WORKSPACE_SKILLS = Path("/workspace/skills")
+# Read-only skills baked into the image at build time
+_REPO_SKILLS = Path("/app/skills")
 
 
 def _skills_root() -> Path:
@@ -59,18 +61,23 @@ def _all_skills() -> list[dict]:
                 "path": str(d),
             }
 
+    # Priority: repo (lowest) → workspace → home (highest/writable)
+    # Later calls overwrite earlier ones, so highest priority is called last.
+    _read_dir(_REPO_SKILLS, writable=False)
     _read_dir(_WORKSPACE_SKILLS, writable=False)
     _read_dir(_SKILLS_HOME, writable=True)
     return list(seen.values())
 
 
 def _skill_dir(skill_id: str) -> tuple[Path, bool]:
-    """Return (path, writable) for a skill, checking both locations."""
-    # Prefer writable home
+    """Return (path, writable) for a skill, checking all locations."""
     p = _SKILLS_HOME / skill_id
     if p.exists():
         return p, True
     p = _WORKSPACE_SKILLS / skill_id
+    if p.exists():
+        return p, False
+    p = _REPO_SKILLS / skill_id
     if p.exists():
         return p, False
     raise HTTPException(404, f"Skill '{skill_id}' not found")
