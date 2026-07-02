@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send, User } from 'lucide-react'
+import { useEffect, useState, useCallback, useRef } from 'react'
+import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send, User, Terminal } from 'lucide-react'
 
 // ── Issue classifier ──────────────────────────────────────────────────────────
 // The pipeline exposes classifier rules; the board uses them without knowing
@@ -130,6 +130,132 @@ function SectionHeader({ icon, label, count, color }: {
   )
 }
 
+// ── Live session log panel ────────────────────────────────────────────────────
+
+interface LogEntry { level: string; message: string; timestamp: string; issue?: number; stage?: string }
+
+const LEVEL_STYLE: Record<string, { color: string; prefix: string }> = {
+  info:        { color: 'var(--muted)',  prefix: 'ℹ' },
+  warn:        { color: 'var(--yellow)', prefix: '⚠' },
+  error:       { color: 'var(--red)',    prefix: '✕' },
+  success:     { color: 'var(--green)',  prefix: '✓' },
+  session_log: { color: 'var(--fg)',     prefix: '›' },
+}
+
+function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: any | null }) {
+  const [entries, setEntries] = useState<LogEntry[]>([])
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const esRef = useRef<EventSource | null>(null)
+
+  useEffect(() => {
+    // Open SSE connection for this pipeline
+    const es = new EventSource(`/api/pipelines/${pipelineId}/logs`)
+    esRef.current = es
+
+    const handle = (e: MessageEvent, level: string) => {
+      try {
+        const d = JSON.parse(e.data)
+        setEntries(prev => {
+          const next = [...prev, { level, message: d.message || '', timestamp: d.timestamp || '', issue: d.issue, stage: d.stage }]
+          return next.slice(-600) // keep last 600 lines
+        })
+      } catch {}
+    }
+
+    const levels = ['info', 'warn', 'error', 'success', 'session_log', 'warning']
+    levels.forEach(lv => es.addEventListener(lv, (e: Event) => handle(e as MessageEvent, lv === 'warning' ? 'warn' : lv)))
+
+    return () => { es.close(); esRef.current = null }
+  }, [pipelineId])
+
+  // Auto-scroll to bottom when entries change
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [entries.length])
+
+  // Clear log when a new active session starts
+  const prevActiveRef = useRef<number | null>(null)
+  useEffect(() => {
+    const issueNum = active?.number ?? null
+    if (issueNum !== prevActiveRef.current && issueNum !== null) {
+      setEntries([])
+    }
+    prevActiveRef.current = issueNum
+  }, [active?.number])
+
+  if (!active && entries.length === 0) return null
+
+  // Filter: when active, show session_log + structured events; when idle show only structured
+  const visible = active
+    ? entries.slice(-300)
+    : entries.filter(e => e.level !== 'session_log').slice(-100)
+
+  return (
+    <div style={{
+      marginTop: 16,
+      border: '1px solid var(--border)',
+      borderRadius: 8,
+      overflow: 'hidden',
+      background: 'color-mix(in srgb, var(--bg) 60%, transparent)',
+    }}>
+      {/* Header */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 12px', borderBottom: '1px solid var(--border)',
+        background: 'var(--card)',
+      }}>
+        <Terminal size={13} color="var(--accent)" />
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
+          {active ? `Live Session — #${active.number || ''} · ${active.stage || ''}` : 'Session Log'}
+        </span>
+        {active && (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--green)' }}>
+            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+            Live
+          </span>
+        )}
+        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{visible.length} lines</span>
+      </div>
+
+      {/* Log scroll area */}
+      <div style={{
+        height: 300, overflowY: 'auto', padding: '8px 0',
+        fontFamily: 'monospace', fontSize: 12,
+      }}>
+        {visible.length === 0 ? (
+          <div style={{ color: 'var(--muted)', padding: '16px 14px', fontSize: 12 }}>
+            Waiting for session output…
+          </div>
+        ) : visible.map((e, i) => {
+          const style = LEVEL_STYLE[e.level] || LEVEL_STYLE.info
+          const isSessionLog = e.level === 'session_log'
+          return (
+            <div key={i} style={{
+              display: 'flex', gap: 8, padding: '1px 14px',
+              alignItems: 'flex-start',
+              background: i % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--border) 20%, transparent)',
+            }}>
+              {!isSessionLog && (
+                <span style={{ color: style.color, flexShrink: 0, fontSize: 11, marginTop: 1 }}>{style.prefix}</span>
+              )}
+              {isSessionLog && (
+                <span style={{ color: 'var(--muted)', flexShrink: 0, fontSize: 10, marginTop: 2, minWidth: 10 }}>›</span>
+              )}
+              <span style={{
+                color: isSessionLog ? 'var(--fg)' : style.color,
+                opacity: isSessionLog ? 0.85 : 1,
+                wordBreak: 'break-word', flex: 1, lineHeight: 1.5,
+                fontWeight: isSessionLog ? 400 : 500,
+              }}>{e.message}</span>
+            </div>
+          )
+        })}
+        <div ref={bottomRef} />
+      </div>
+    </div>
+  )
+}
+
 // ── Pipeline activity card ────────────────────────────────────────────────────
 
 function PipelineActivity({ pipeline }: { pipeline: any }) {
@@ -185,6 +311,9 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
           {active.map((item, i) => <IssueRow key={i} item={item} showMeta />)}
         </div>
       )}
+
+      {/* Live session log — shown when active or when log has content */}
+      <SessionLogPanel pipelineId={pipeline.id} active={active[0] ?? null} />
 
       {/* Waiting for Human — human stages or human-signal labels */}
       {!loading && waitingHuman.length > 0 && (

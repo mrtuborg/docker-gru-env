@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, DollarSign, Clock, Activity, CheckCircle2, XCircle, ChevronDown } from 'lucide-react'
+import { RefreshCw, DollarSign, Clock, Activity, CheckCircle2, XCircle } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,17 +115,15 @@ const DAYS_OPTIONS = [
 ]
 
 export default function SessionsPage() {
-  const [pipelines, setPipelines] = useState<any[]>([])
   const [pipelineId, setPipelineId] = useState<string>('')
   const [days, setDays] = useState(7)
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
 
-  // Load pipeline list once
+  // Load first pipeline once, then fetch sessions
   useEffect(() => {
     fetch('/api/pipelines').then(r => r.json()).then((list: any[]) => {
-      setPipelines(Array.isArray(list) ? list : [])
-      if (list.length > 0) setPipelineId(list[0].id)
+      if (Array.isArray(list) && list.length > 0) setPipelineId(list[0].id)
     }).catch(() => {})
   }, [])
 
@@ -160,24 +158,6 @@ export default function SessionsPage() {
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 120 }}>Sessions & Cost</h1>
 
-        {/* Pipeline picker */}
-        {pipelines.length > 0 && (
-          <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-            <select
-              value={pipelineId}
-              onChange={e => setPipelineId(e.target.value)}
-              style={{
-                appearance: 'none', background: 'var(--card)', border: '1px solid var(--border)',
-                borderRadius: 7, padding: '6px 30px 6px 10px', fontSize: 13, fontWeight: 500,
-                color: 'var(--fg)', cursor: 'pointer', minWidth: 150,
-              }}
-            >
-              {pipelines.map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
-            </select>
-            <ChevronDown size={14} style={{ position: 'absolute', right: 8, pointerEvents: 'none', color: 'var(--muted)' }} />
-          </div>
-        )}
-
         {/* Time range */}
         <div style={{ display: 'flex', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
           {DAYS_OPTIONS.map(opt => (
@@ -200,13 +180,13 @@ export default function SessionsPage() {
       </div>
 
       {/* No pipeline configured */}
-      {pipelines.length === 0 && (
+      {!pipelineId && !loading && (
         <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--muted)' }}>
           No pipelines configured yet.
         </div>
       )}
 
-      {pipelines.length > 0 && (
+      {pipelineId && (
         <>
           {/* Stats row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 20 }}>

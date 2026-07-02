@@ -681,7 +681,20 @@ class PipelineEngine:
                 env=env,
                 cwd=working_dir,
             )
-            stdout, _ = await proc.communicate()
+
+            # Stream output line-by-line so the Boards page can show live thoughts
+            _ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+            output_lines: list[str] = []
+            async for raw in proc.stdout:  # type: ignore[union-attr]
+                line = _ansi.sub('', raw.decode(errors='replace')).rstrip()
+                if line.strip():
+                    output_lines.append(line)
+                    self._emit(
+                        pipeline["id"], "session_log", line,
+                        issue=issue.number, stage=pipeline.get("current_stage", ""),
+                    )
+
+            await proc.wait()
             exit_code = proc.returncode or 0
         except FileNotFoundError:
             self._emit(pipeline["id"], "error", "copilot CLI not found — ensure the Copilot CLI is installed in the container")
@@ -693,7 +706,7 @@ class PipelineEngine:
         duration = time.monotonic() - start
         timed_out = exit_code == 124
 
-        output_text = stdout.decode(errors="replace") if stdout else ""
+        output_text = "\n".join(output_lines)
         if exit_code != 0 and not timed_out:
             # Log first 500 chars of output to help diagnose failures
             preview = output_text[:500].strip()
