@@ -160,13 +160,23 @@ function IssueDrawer({
 
   const issueNum = issue.number ?? issue.issue_number
 
-  // Fetch DB run history for this issue
+  // Clear log when switching to a different issue
   useEffect(() => {
-    fetch(`/api/pipelines/${pipelineId}/issues/${issueNum}/history`)
+    setEntries([])
+    atBottomRef.current = true
+  }, [issueNum])
+
+  // Fetch DB run history; abort if issue changes before response arrives
+  useEffect(() => {
+    const ac = new AbortController()
+    setHistory([])
+    fetch(`/api/pipelines/${pipelineId}/issues/${issueNum}/history`, { signal: ac.signal })
       .then(r => r.json()).then(d => setHistory(Array.isArray(d) ? d : [])).catch(() => {})
+    return () => ac.abort()
   }, [pipelineId, issueNum])
 
-  // SSE: connect only when the issue is actively running
+  // SSE: connect only when issue is active; pipeline-wide stream, filtered client-side
+  // issueNum intentionally NOT in deps — the stream is pipeline-wide
   useEffect(() => {
     if (!isActive) return
     const es = new EventSource(`/api/pipelines/${pipelineId}/logs`)
@@ -184,7 +194,7 @@ function IssueDrawer({
       lv => es.addEventListener(lv, (e: Event) => handle(e as MessageEvent, lv))
     )
     return () => es.close()
-  }, [pipelineId, isActive, issueNum])
+  }, [pipelineId, isActive])  // issueNum excluded — not used in body
 
   // Auto-scroll agent section only when already at bottom
   useEffect(() => {
@@ -196,8 +206,12 @@ function IssueDrawer({
   const issueTitle = issue.title ?? issue.issue_title ?? issue.name ?? ''
   const issueStage = issue.stage ?? ''
 
-  // Split SSE stream: orchestrator = structured events; agent = session_log for this issue
-  const orchEntries = entries.filter(e => e.level !== 'session_log' && (e.issue === issueNum || !e.issue))
+  // Split SSE stream:
+  //   Orchestrator = structured engine events tagged to this issue
+  //   Agent        = Copilot CLI output lines tagged to this issue
+  // Untagged pipeline-level events (e.issue === 0) are NOT shown here to
+  // avoid showing irrelevant global chatter when inspecting a specific issue.
+  const orchEntries = entries.filter(e => e.level !== 'session_log' && e.issue === issueNum)
   const agentEntries = entries.filter(e => e.level === 'session_log' && e.issue === issueNum)
 
   return (
