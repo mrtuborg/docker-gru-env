@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send, User, Terminal } from 'lucide-react'
+import { RefreshCw, Play, Clock, CheckCircle2, Zap, Plus, Trash2, Edit2, X, Wand2, Send, User } from 'lucide-react'
 
 // ── Issue classifier ──────────────────────────────────────────────────────────
 // The pipeline exposes classifier rules; the board uses them without knowing
@@ -130,135 +130,210 @@ function SectionHeader({ icon, label, count, color }: {
   )
 }
 
-// ── Live session log panel ────────────────────────────────────────────────────
+// ── Issue Drawer — click any issue row to see session logs ────────────────────
 
 interface LogEntry { level: string; message: string; timestamp: string; issue?: number; stage?: string }
 
-const LEVEL_STYLE: Record<string, { color: string; prefix: string }> = {
-  info:        { color: 'var(--muted)',  prefix: 'ℹ' },
-  warn:        { color: 'var(--yellow)', prefix: '⚠' },
-  error:       { color: 'var(--red)',    prefix: '✕' },
-  success:     { color: 'var(--green)',  prefix: '✓' },
-  session_log: { color: 'var(--fg)',     prefix: '›' },
+const ORCH_STYLE: Record<string, { color: string; icon: string }> = {
+  info:    { color: 'var(--muted)',  icon: 'ℹ' },
+  warn:    { color: 'var(--yellow)', icon: '⚠' },
+  warning: { color: 'var(--yellow)', icon: '⚠' },
+  error:   { color: 'var(--red)',    icon: '✕' },
+  success: { color: 'var(--green)',  icon: '✓' },
 }
 
-function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: any | null }) {
+function fmtDurShort(s: number | null | undefined) {
+  if (s == null) return '—'
+  if (s < 60) return `${Math.round(s)}s`
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
+}
+
+function IssueDrawer({
+  pipelineId, issue, isActive, onClose,
+}: {
+  pipelineId: string; issue: any; isActive: boolean; onClose: () => void
+}) {
   const [entries, setEntries] = useState<LogEntry[]>([])
-  const scrollRef = useRef<HTMLDivElement>(null)
-  const atBottomRef = useRef(true)  // track whether user is near bottom
+  const [history, setHistory] = useState<any[]>([])
+  const agentScrollRef = useRef<HTMLDivElement>(null)
+  const atBottomRef = useRef(true)
 
-  // SSE: connect only when there is an active session; disconnect when idle
+  const issueNum = issue.number ?? issue.issue_number
+
+  // Fetch DB run history for this issue
   useEffect(() => {
-    if (!active) return  // don't open SSE connection when nothing is running
+    fetch(`/api/pipelines/${pipelineId}/issues/${issueNum}/history`)
+      .then(r => r.json()).then(d => setHistory(Array.isArray(d) ? d : [])).catch(() => {})
+  }, [pipelineId, issueNum])
 
+  // SSE: connect only when the issue is actively running
+  useEffect(() => {
+    if (!isActive) return
     const es = new EventSource(`/api/pipelines/${pipelineId}/logs`)
-
     const handle = (e: MessageEvent, level: string) => {
       try {
         const d = JSON.parse(e.data)
-        setEntries(prev => {
-          const next = [...prev, { level, message: d.message || '', timestamp: d.timestamp || '', issue: d.issue, stage: d.stage }]
-          return next.slice(-600)
-        })
+        setEntries(prev => [...prev, {
+          level: level === 'warning' ? 'warn' : level,
+          message: d.message || '', timestamp: d.timestamp || '',
+          issue: d.issue, stage: d.stage,
+        }].slice(-800))
       } catch {}
     }
-
-    const levels = ['info', 'warn', 'error', 'success', 'session_log', 'warning']
-    levels.forEach(lv => es.addEventListener(lv, (e: Event) => handle(e as MessageEvent, lv === 'warning' ? 'warn' : lv)))
-
+    ;['info', 'warn', 'warning', 'error', 'success', 'session_log'].forEach(
+      lv => es.addEventListener(lv, (e: Event) => handle(e as MessageEvent, lv))
+    )
     return () => es.close()
-  }, [pipelineId, active?.number, active?.stage])  // reconnect when session changes
+  }, [pipelineId, isActive, issueNum])
 
-  // Auto-scroll only when already at bottom (respect user scroll position)
+  // Auto-scroll agent section only when already at bottom
   useEffect(() => {
     if (!atBottomRef.current) return
-    const el = scrollRef.current
+    const el = agentScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
   }, [entries.length])
 
-  // Reset log when a new session starts (keyed on issue + stage combo)
-  const sessionKey = active ? `${active.number}:${active.stage}` : null
-  const prevKeyRef = useRef<string | null>(null)
-  useEffect(() => {
-    if (sessionKey && sessionKey !== prevKeyRef.current) {
-      setEntries([])
-      atBottomRef.current = true
-    }
-    prevKeyRef.current = sessionKey
-  }, [sessionKey])
+  const issueTitle = issue.title ?? issue.issue_title ?? issue.name ?? ''
+  const issueStage = issue.stage ?? ''
 
-  const handleScroll = () => {
-    const el = scrollRef.current
-    if (!el) return
-    atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-  }
-
-  if (!active && entries.length === 0) return null
-
-  const visible = active
-    ? entries.slice(-300)
-    : entries.filter(e => e.level !== 'session_log').slice(-100)
+  // Split SSE stream: orchestrator = structured events; agent = session_log for this issue
+  const orchEntries = entries.filter(e => e.level !== 'session_log' && (e.issue === issueNum || !e.issue))
+  const agentEntries = entries.filter(e => e.level === 'session_log' && e.issue === issueNum)
 
   return (
-    <div style={{
-      marginTop: 16,
-      border: '1px solid var(--border)',
-      borderRadius: 8,
-      overflow: 'hidden',
-      background: 'color-mix(in srgb, var(--bg) 60%, transparent)',
-    }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 8,
-        padding: '7px 12px', borderBottom: '1px solid var(--border)',
-        background: 'var(--card)',
-      }}>
-        <Terminal size={13} color="var(--accent)" />
-        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
-          {active ? `Live Session — #${active.number || ''} · ${active.stage || ''}` : 'Session Log'}
-        </span>
-        {active && (
-          <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--green)' }}>
-            <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1.5s ease-in-out infinite' }} />
-            Live
-          </span>
-        )}
-        <span style={{ fontSize: 10, color: 'var(--muted)' }}>{visible.length} lines</span>
-      </div>
+    <>
+      {/* Backdrop */}
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', zIndex: 200 }} />
 
-      {/* Log scroll area */}
-      <div
-        ref={scrollRef}
-        onScroll={handleScroll}
-        style={{ height: 300, overflowY: 'auto', padding: '8px 0', fontFamily: 'monospace', fontSize: 12 }}
-      >
-        {visible.length === 0 ? (
-          <div style={{ color: 'var(--muted)', padding: '16px 14px', fontSize: 12 }}>
-            Waiting for session output…
-          </div>
-        ) : visible.map((e, i) => {
-          const style = LEVEL_STYLE[e.level] || LEVEL_STYLE.info
-          const isSessionLog = e.level === 'session_log'
-          return (
-            <div key={i} style={{
-              display: 'flex', gap: 8, padding: '1px 14px',
-              alignItems: 'flex-start',
-              background: i % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--border) 20%, transparent)',
-            }}>
-              <span style={{ color: isSessionLog ? 'var(--muted)' : style.color, flexShrink: 0, fontSize: isSessionLog ? 10 : 11, marginTop: isSessionLog ? 2 : 1, minWidth: 10 }}>
-                {style.prefix}
-              </span>
-              <span style={{
-                color: isSessionLog ? 'var(--fg)' : style.color,
-                opacity: isSessionLog ? 0.85 : 1,
-                wordBreak: 'break-word', flex: 1, lineHeight: 1.5,
-                fontWeight: isSessionLog ? 400 : 500,
-              }}>{e.message}</span>
+      {/* Drawer */}
+      <div style={{
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 460,
+        background: 'var(--bg)', zIndex: 201, display: 'flex', flexDirection: 'column',
+        boxShadow: '-8px 0 40px rgba(0,0,0,0.25)', overflow: 'hidden',
+      }}>
+
+        {/* Header */}
+        <div style={{ padding: '16px 18px 14px', borderBottom: '1px solid var(--border)', background: 'var(--card)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontFamily: 'monospace', color: 'var(--muted)', marginBottom: 3 }}>
+                #{issueNum}
+                {issueStage && (
+                  <span style={{
+                    marginLeft: 8, background: 'color-mix(in srgb, var(--accent) 15%, transparent)',
+                    color: 'var(--accent)', borderRadius: 4, padding: '1px 7px', fontSize: 11, fontWeight: 600,
+                  }}>{issueStage}</span>
+                )}
+                {isActive && (
+                  <span style={{ marginLeft: 8, display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: 'var(--green)' }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--green)', animation: 'pulse 1.5s ease-in-out infinite' }} />
+                    Live
+                  </span>
+                )}
+              </div>
+              <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={issueTitle}>
+                {issueTitle || `Issue #${issueNum}`}
+              </div>
             </div>
-          )
-        })}
+            <button onClick={onClose} className="btn btn-ghost" style={{ padding: '4px 8px', flexShrink: 0 }}><X size={16} /></button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+
+          {/* ── Orchestrator ─────────────────────────────────────── */}
+          <div style={{ flexShrink: 0, maxHeight: '35%', display: 'flex', flexDirection: 'column', borderBottom: '2px solid var(--border)' }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--card))',
+              borderBottom: '1px solid var(--border)', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 13 }}>⚙️</span>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--accent)' }}>Orchestrator</span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>{orchEntries.length} events</span>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1, fontSize: 12 }}>
+              {orchEntries.length === 0 ? (
+                <div style={{ padding: '10px 16px', color: 'var(--muted)', fontStyle: 'italic' }}>
+                  {isActive ? 'Waiting for orchestrator events…' : 'No orchestrator events for this session.'}
+                </div>
+              ) : orchEntries.slice(-80).map((e, i) => {
+                const st = ORCH_STYLE[e.level] || ORCH_STYLE.info
+                return (
+                  <div key={i} style={{
+                    display: 'flex', gap: 8, padding: '3px 14px 3px 11px',
+                    alignItems: 'flex-start',
+                    borderLeft: `3px solid ${st.color}`,
+                    background: i % 2 === 0 ? 'transparent' : 'color-mix(in srgb, var(--border) 15%, transparent)',
+                  }}>
+                    <span style={{ color: st.color, flexShrink: 0, fontWeight: 700, lineHeight: 1.5 }}>{st.icon}</span>
+                    <span style={{ color: st.color, wordBreak: 'break-word', flex: 1, lineHeight: 1.5 }}>{e.message}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* ── Stage Agent ───────────────────────────────────────── */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '8px 14px',
+              background: 'color-mix(in srgb, #6366f1 8%, var(--card))',
+              borderBottom: '1px solid var(--border)', flexShrink: 0,
+            }}>
+              <span style={{ fontSize: 13 }}>🤖</span>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#6366f1' }}>Stage Agent</span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>{agentEntries.length} lines</span>
+            </div>
+            <div
+              ref={agentScrollRef}
+              onScroll={() => {
+                const el = agentScrollRef.current
+                if (el) atBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+              }}
+              style={{ flex: 1, overflowY: 'auto', padding: '4px 0', fontFamily: 'monospace', fontSize: 11.5, background: 'color-mix(in srgb, #000 20%, var(--bg))' }}
+            >
+              {agentEntries.length === 0 ? (
+                <div style={{ padding: '10px 16px', color: 'var(--muted)', fontStyle: 'italic', fontFamily: 'sans-serif', fontSize: 12 }}>
+                  {isActive ? 'Waiting for agent output…' : 'Agent output is captured only for live sessions.'}
+                </div>
+              ) : agentEntries.map((e, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8, padding: '1px 14px', alignItems: 'flex-start', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.03)' }}>
+                  <span style={{ color: '#555', flexShrink: 0, marginTop: 1, lineHeight: 1.6 }}>›</span>
+                  <span style={{ color: '#c9d1d9', wordBreak: 'break-word', flex: 1, lineHeight: 1.6 }}>{e.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Run History ───────────────────────────────────────── */}
+          {history.length > 0 && (
+            <div style={{ flexShrink: 0, maxHeight: '30%', overflowY: 'auto', borderTop: '2px solid var(--border)' }}>
+              <div style={{ padding: '8px 14px 6px', fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: 'var(--muted)' }}>
+                Run History
+              </div>
+              {history.map((r, i) => {
+                const ok = ['success', 'completed', 'done'].includes(r.status)
+                const fail = ['failure', 'failed', 'error'].includes(r.status)
+                return (
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
+                    <span style={{ color: ok ? 'var(--green)' : fail ? 'var(--red)' : 'var(--muted)', fontWeight: 700, minWidth: 14 }}>
+                      {ok ? '✓' : fail ? '✕' : '○'}
+                    </span>
+                    <span style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{r.stage}</span>
+                    <span style={{ color: 'var(--muted)', flexShrink: 0 }}>{fmtDurShort(r.duration_s)}</span>
+                    {r.cost_usd ? <span style={{ color: 'var(--muted)', fontSize: 11, fontFamily: 'monospace' }}>${r.cost_usd.toFixed(4)}</span> : null}
+                    {r.error_message && <span style={{ color: 'var(--red)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={r.error_message}>{r.error_message}</span>}
+                    <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtTime(r.started_at)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </>
   )
 }
 
@@ -267,6 +342,7 @@ function SessionLogPanel({ pipelineId, active }: { pipelineId: string; active: a
 function PipelineActivity({ pipeline }: { pipeline: any }) {
   const [status, setStatus] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [selectedIssue, setSelectedIssue] = useState<any>(null)
 
   const load = async () => {
     setLoading(true)
@@ -279,7 +355,6 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
 
   useEffect(() => { load() }, [pipeline.id])
 
-  // Build classifier config from what the pipeline tells us — board never hardcodes these
   const classifierConfig: ClassifierConfig = {
     humanStages: status?.classifier?.human_stages ?? [],
     humanLabels: status?.classifier?.human_labels ?? [],
@@ -291,6 +366,9 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
   const isEmpty = active.length === 0 && aiQueue.length === 0 && waitingHuman.length === 0 && recent.length === 0
 
   const QUEUE_SHOW = 8
+  const openIssue = (item: any) => setSelectedIssue(item)
+  const closeIssue = () => setSelectedIssue(null)
+  const isIssueActive = (item: any) => !!(active[0] && (active[0].number === (item.number ?? item.issue_number)))
 
   return (
     <div className="card" style={{ padding: '16px 20px' }}>
@@ -302,44 +380,47 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
             {pipeline.status === 'running' ? '● Running' : pipeline.status === 'paused' ? '⏸ Paused' : pipeline.status}
           </div>
         </div>
-        <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={load}>
-          <RefreshCw size={12} />
-        </button>
+        <button className="btn btn-ghost" style={{ padding: '4px 8px' }} onClick={load}><RefreshCw size={12} /></button>
       </div>
 
       {loading && <div style={{ display: 'flex', gap: 8, color: 'var(--muted)', fontSize: 13 }}><div className="spinner" style={{ width: 14, height: 14 }} /> Loading…</div>}
       {!loading && isEmpty && <div style={{ color: 'var(--muted)', fontSize: 13, textAlign: 'center', padding: '16px 0' }}>No activity yet — pipeline is idle.</div>}
 
-      {/* Active — currently being processed by AI agents */}
+      {/* Active */}
       {!loading && active.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <SectionHeader icon={<Play size={11} />} label="Active" color="var(--green)" />
-          {active.map((item, i) => <IssueRow key={i} item={item} showMeta />)}
+          {active.map((item, i) => (
+            <div key={i} onClick={() => openIssue(item)} style={{ cursor: 'pointer' }}>
+              <IssueRow item={item} showMeta />
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Live session log — shown when active or when log has content */}
-      <SessionLogPanel pipelineId={pipeline.id} active={active[0] ?? null} />
-
-      {/* Waiting for Human — human stages or human-signal labels */}
+      {/* Waiting for Human */}
       {!loading && waitingHuman.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <SectionHeader icon={<User size={11} />} label="Waiting for Human" count={waitingHuman.length} color="var(--yellow)" />
-          {waitingHuman.slice(0, QUEUE_SHOW).map((item, i) => <IssueRow key={i} item={item} />)}
-          {waitingHuman.length > QUEUE_SHOW && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{waitingHuman.length - QUEUE_SHOW} more</div>
-          )}
+          {waitingHuman.slice(0, QUEUE_SHOW).map((item, i) => (
+            <div key={i} onClick={() => openIssue(item)} style={{ cursor: 'pointer' }}>
+              <IssueRow item={item} />
+            </div>
+          ))}
+          {waitingHuman.length > QUEUE_SHOW && <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{waitingHuman.length - QUEUE_SHOW} more</div>}
         </div>
       )}
 
-      {/* AI Queue — waiting for pipeline agents to pick up */}
+      {/* AI Queue */}
       {!loading && aiQueue.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <SectionHeader icon={<Clock size={11} />} label="AI Queue" count={aiQueue.length} color="var(--accent)" />
-          {aiQueue.slice(0, QUEUE_SHOW).map((item, i) => <IssueRow key={i} item={item} />)}
-          {aiQueue.length > QUEUE_SHOW && (
-            <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{aiQueue.length - QUEUE_SHOW} more</div>
-          )}
+          {aiQueue.slice(0, QUEUE_SHOW).map((item, i) => (
+            <div key={i} onClick={() => openIssue(item)} style={{ cursor: 'pointer' }}>
+              <IssueRow item={item} />
+            </div>
+          ))}
+          {aiQueue.length > QUEUE_SHOW && <div style={{ fontSize: 12, color: 'var(--muted)', paddingTop: 6 }}>+{aiQueue.length - QUEUE_SHOW} more</div>}
         </div>
       )}
 
@@ -347,8 +428,22 @@ function PipelineActivity({ pipeline }: { pipeline: any }) {
       {!loading && recent.length > 0 && (
         <div>
           <SectionHeader icon={<CheckCircle2 size={11} />} label="Recently Processed" color="var(--muted)" />
-          {recent.map((item, i) => <IssueRow key={i} item={item} dim />)}
+          {recent.map((item, i) => (
+            <div key={i} onClick={() => openIssue(item)} style={{ cursor: 'pointer' }}>
+              <IssueRow item={item} dim />
+            </div>
+          ))}
         </div>
+      )}
+
+      {/* Issue drawer — rendered as a portal-like fixed overlay */}
+      {selectedIssue && (
+        <IssueDrawer
+          pipelineId={pipeline.id}
+          issue={selectedIssue}
+          isActive={isIssueActive(selectedIssue)}
+          onClose={closeIssue}
+        />
       )}
     </div>
   )

@@ -683,6 +683,23 @@ async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
         }
 
 
+async def get_issue_run_history(pipeline_id: str, issue_number: int) -> list[dict]:
+    """All run items for a specific issue number in this pipeline, newest first."""
+    async with aiosqlite.connect(get_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT ri.stage, ri.status, ri.started_at, ri.ended_at,
+                      ri.duration_s, ri.model, ri.cost_usd, ri.error_message
+               FROM pipeline_run_items ri
+               JOIN pipeline_runs pr ON ri.run_id = pr.id
+               WHERE pr.pipeline_id = ? AND ri.issue_number = ?
+               ORDER BY ri.started_at DESC
+               LIMIT 100""",
+            (pipeline_id, issue_number),
+        ) as cur:
+            return [dict(r) async for r in cur]
+
+
 # ── Pipeline state (resume) ──────────────────────────────────────────────────
 
 async def get_pipeline_state(pipeline_id: str) -> dict[str, dict]:
