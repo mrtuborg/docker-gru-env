@@ -4,10 +4,10 @@
 # Usage:
 #   ./gru-server status               # running? port? uptime?
 #   ./gru-server start                # start (create if needed)
+#   ./gru-server start --port PORT    # bind to PORT (auto-recreates container if port changed)
 #   ./gru-server stop                 # graceful stop
 #   ./gru-server restart              # stop + start
 #   ./gru-server logs                 # tail container logs
-#   ./gru-server recreate             # remove container (keep volume) + recreate
 #   ./gru-server wipe                 # ⚠ remove container AND volume, then recreate
 #   ./gru-server rebuild              # rebuild image + wipe + recreate
 #
@@ -82,17 +82,21 @@ do_start() {
     if [[ -n "$HOST_PORT" ]]; then
       local mapped; mapped=$(docker inspect --format '{{range $p,$v := .HostConfig.PortBindings}}{{range $v}}{{.HostPort}} {{end}}{{end}}' "$CONTAINER" 2>/dev/null)
       if ! echo "$mapped" | grep -qw "$HOST_PORT"; then
-        echo "⚠  Container already exists without port $HOST_PORT mapped."
-        echo "   To bind port $HOST_PORT, recreate the container:"
-        echo "   ./gru-server fresh --port $HOST_PORT"
-        exit 1
+        echo "▶ Recreating $CONTAINER with port $HOST_PORT (data volume preserved) …"
+        docker rm -f "$CONTAINER" 2>/dev/null || true
+        # fall through to create below
+      else
+        echo "▶ Starting $CONTAINER …"
+        docker start "$CONTAINER"
+        docker network connect "$DB_NETWORK" "$CONTAINER" 2>/dev/null || true
+        do_status; return
       fi
+    else
+      echo "▶ Starting $CONTAINER …"
+      docker start "$CONTAINER"
+      docker network connect "$DB_NETWORK" "$CONTAINER" 2>/dev/null || true
+      do_status; return
     fi
-    echo "▶ Starting $CONTAINER …"
-    docker start "$CONTAINER"
-    docker network connect "$DB_NETWORK" "$CONTAINER" 2>/dev/null || true
-    do_status
-    return
   fi
 
   # new container — pick port
@@ -130,13 +134,6 @@ do_stop() {
   echo "✓ Stopped"
 }
 
-do_recreate() {
-  echo "▶ Removing $CONTAINER (volume kept) …"
-  docker rm -f "$CONTAINER" 2>/dev/null || true
-  echo "✓ Container removed — data volume preserved"
-  do_start
-}
-
 do_wipe() {
   echo "⚠  Wiping $CONTAINER AND volume $VOLUME — all data will be lost!"
   docker rm -f "$CONTAINER" 2>/dev/null || true
@@ -158,16 +155,12 @@ case "$CMD" in
   start)   do_start ;;
   stop)    do_stop ;;
   restart) do_stop; do_start ;;
-  logs)     docker logs -f "$CONTAINER" ;;
-  recreate) do_recreate ;;
-  wipe)     do_wipe ;;
-  rebuild)  do_rebuild ;;
+  logs)    docker logs -f "$CONTAINER" ;;
+  wipe)    do_wipe ;;
+  rebuild) do_rebuild ;;
   *)
-    echo "Usage: $0 {status|start|stop|restart|logs|recreate|wipe|rebuild} [--port PORT]" >&2
-    echo "  recreate — remove container, keep volume (data preserved), recreate" >&2
-    echo "  wipe     — ⚠ remove container AND volume, recreate from scratch" >&2
-    exit 1 ;;
-  *)
-    echo "Usage: $0 {status|start|stop|restart|logs|fresh|rebuild} [--port PORT]" >&2
+    echo "Usage: $0 {status|start|stop|restart|logs|wipe|rebuild} [--port PORT]" >&2
+    echo "  start --port PORT  — bind to PORT (auto-recreates container if port changed)" >&2
+    echo "  wipe               — ⚠ remove container AND volume, recreate from scratch" >&2
     exit 1 ;;
 esac
