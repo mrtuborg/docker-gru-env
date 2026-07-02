@@ -13,8 +13,10 @@
 #   ./gru.sh db stop             # stop DB only
 #
 # Flags:
-#   --fresh                      # (with start) wipe volumes and recreate
-#   --rebuild                    # (with start) rebuild image first
+#   --port PORT      bind gru-server to PORT on the host (default: 9400 / $GRU_PORT)
+#   --db-port PORT   expose postgres to the host on PORT (default: not exposed)
+#   --fresh          wipe volumes and recreate containers
+#   --rebuild        rebuild the server image first, then --fresh
 
 set -euo pipefail
 
@@ -24,10 +26,12 @@ SERVER_CONTAINER="gru-server-dev"
 SERVER_IMAGE="gru-server:latest"
 SERVER_VOLUME="gru-data"
 SERVER_PORT="${GRU_PORT:-9400}"
+SERVER_HOST_PORT=""   # overridden by --port
 
 DB_CONTAINER="gru-analytics-db"
 DB_VOLUME="gru-analytics-data"
 DB_NETWORK="gru-network"
+DB_HOST_PORT=""       # set by --db-port to expose postgres to host
 DB_URL="postgresql://gru:gru@${DB_CONTAINER}:5432/gru_analytics"
 
 AZURE_DIR="$HOME/.azure"
@@ -88,9 +92,15 @@ db_start() {
     docker network connect "$DB_NETWORK" "$DB_CONTAINER" 2>/dev/null || true
   else
     echo "▶ Creating $DB_CONTAINER …"
+    local db_port_args=()
+    if [[ -n "$DB_HOST_PORT" ]]; then
+      db_port_args=(-p "${DB_HOST_PORT}:5432")
+      echo "  Postgres exposed on host port $DB_HOST_PORT"
+    fi
     docker run -d \
       --name "$DB_CONTAINER" \
       --network "$DB_NETWORK" \
+      "${db_port_args[@]+"${db_port_args[@]}"}" \
       -v "${DB_VOLUME}:/var/lib/postgresql/data" \
       -e POSTGRES_USER=gru \
       -e POSTGRES_PASSWORD=gru \
@@ -163,7 +173,11 @@ server_start() {
     docker network connect "$DB_NETWORK" "$SERVER_CONTAINER" 2>/dev/null || true
   else
     local port
-    port=$(find_free_port "$SERVER_PORT")
+    if [[ -n "$SERVER_HOST_PORT" ]]; then
+      port="$SERVER_HOST_PORT"
+    else
+      port=$(find_free_port "$SERVER_PORT")
+    fi
     echo "▶ Creating $SERVER_CONTAINER on port $port …"
 
     local azure_args=()
@@ -202,9 +216,18 @@ CMD="${1:-status}"
 SUB="${2:-}"
 FRESH=0; REBUILD=0
 
-for arg in "$@"; do
-  [[ "$arg" == "--fresh"   ]] && FRESH=1
-  [[ "$arg" == "--rebuild" ]] && REBUILD=1
+i=1
+while [[ $i -le $# ]]; do
+  arg="${!i}"
+  case "$arg" in
+    --fresh)   FRESH=1 ;;
+    --rebuild) REBUILD=1 ;;
+    --port)
+      i=$((i+1)); SERVER_HOST_PORT="${!i}" ;;
+    --db-port)
+      i=$((i+1)); DB_HOST_PORT="${!i}" ;;
+  esac
+  i=$((i+1))
 done
 
 case "$CMD" in
@@ -255,7 +278,9 @@ case "$CMD" in
 
   *)
     echo "Usage: $0 {status|start|stop|restart|logs [db]|db {status|start|stop|fresh}}" >&2
-    echo "Flags: --fresh --rebuild" >&2
+    echo "Flags: --fresh --rebuild --port PORT --db-port PORT" >&2
+    echo "       --port PORT     bind gru-server to this host port (default: $SERVER_PORT)" >&2
+    echo "       --db-port PORT  expose postgres to host on this port (default: not exposed)" >&2
     exit 1
     ;;
 esac
