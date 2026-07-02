@@ -117,6 +117,7 @@ CREATE TABLE IF NOT EXISTS pipeline_stages (
     prompt      TEXT DEFAULT '',
     on_success  TEXT DEFAULT '',
     on_failure  TEXT DEFAULT '',
+    on_failure_label TEXT DEFAULT '',
     on_timeout  TEXT DEFAULT '',
     env_json    TEXT DEFAULT '{}',
     PRIMARY KEY (pipeline_id, column_name),
@@ -196,6 +197,7 @@ async def init_db() -> None:
             "ALTER TABLE agents ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE pipelines ADD COLUMN orchestrator_agent_id TEXT DEFAULT ''",
             "ALTER TABLE pipeline_run_items ADD COLUMN issue_title TEXT",
+            "ALTER TABLE pipeline_stages ADD COLUMN on_failure_label TEXT DEFAULT ''",
         ]
         for stmt in migrations:
             try:
@@ -500,13 +502,15 @@ async def upsert_pipeline(data: dict) -> None:
         for i, stage in enumerate(data.get("stages", [])):
             await db.execute(
                 """INSERT INTO pipeline_stages(pipeline_id, stage_index, column_name, actor,
-                       agent_id, task_prompt, prompt, on_success, on_failure, on_timeout, env_json)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                       agent_id, task_prompt, prompt, on_success, on_failure, on_failure_label,
+                       on_timeout, env_json)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     pid, i, stage["column"], stage.get("actor", "ai"),
                     stage.get("agent_id", ""), stage.get("task_prompt", ""),
                     stage.get("prompt", ""), stage.get("on_success", ""),
-                    stage.get("on_failure", ""), stage.get("on_timeout", ""),
+                    stage.get("on_failure", ""), stage.get("on_failure_label", ""),
+                    stage.get("on_timeout", ""),
                     json.dumps(stage.get("env", {})),
                 ),
             )

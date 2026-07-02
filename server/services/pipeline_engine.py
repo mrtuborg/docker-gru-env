@@ -371,6 +371,7 @@ class PipelineEngine:
             # Move issue on board based on on_success / on_failure stage config
             on_success_col = stage_cfg.get("on_success", "") or ""
             on_failure_col = stage_cfg.get("on_failure", "") or ""
+            on_failure_label = stage_cfg.get("on_failure_label", "") or ""
 
             if result.exit_code == 0 and not result.timed_out and on_success_col:
                 moved = await self._move_issue(pipeline, issue, on_success_col, token)
@@ -379,9 +380,11 @@ class PipelineEngine:
                     result.new_stage = on_success_col
                 else:
                     result.exit_code = 1  # move failed → treat as failure
-            elif (result.exit_code != 0 or result.timed_out) and on_failure_col:
-                await self._move_issue(pipeline, issue, on_failure_col, token)
-                # even if failure-move fails, we still record as failed session
+            elif (result.exit_code != 0 or result.timed_out):
+                if on_failure_label:
+                    await self._add_label_to_issue(pipeline, issue, on_failure_label, token)
+                if on_failure_col:
+                    await self._move_issue(pipeline, issue, on_failure_col, token)
             elif result.exit_code == 0 and not result.timed_out and not on_success_col:
                 # No on_success configured — fall back to polling GitHub for progression
                 result = await self._check_progression(pipeline, issue, token, result)
@@ -813,6 +816,39 @@ class PipelineEngine:
 
         except Exception as e:
             logger.warning("_move_issue failed for #%d: %s", issue.number, e)
+            return False
+
+    # ── Label helper ──────────────────────────────────────────────────────────
+
+    async def _add_label_to_issue(
+        self, pipeline: dict, issue: "BoardIssue", label: str, token: str,
+    ) -> bool:
+        """Add a label to the issue via the REST API. Creates the label if missing."""
+        gh_host = _gh_host_for(pipeline.get("plugin_id", ""))
+        api_base = (
+            f"https://{gh_host}/api/v3"
+            if gh_host != "github.com"
+            else "https://api.github.com"
+        )
+        owner, repo_name = issue.repo.split("/", 1) if "/" in issue.repo else (issue.repo, "")
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                url = f"{api_base}/repos/{owner}/{repo_name}/issues/{issue.number}/labels"
+                resp = await client.post(url, headers=headers, json={"labels": [label]})
+                if resp.status_code in (200, 201):
+                    self._emit(pipeline["id"], "info",
+                        f"Labelled #{issue.number} → {label}",
+                        issue=issue.number, stage=issue.stage)
+                    return True
+                logger.warning("_add_label failed %d for #%d: %s",
+                               resp.status_code, issue.number, resp.text[:200])
+                return False
+        except Exception as e:
+            logger.warning("_add_label failed for #%d: %s", issue.number, e)
             return False
 
     # ── Progression detection (fallback when on_success not configured) ────────

@@ -14,6 +14,7 @@ interface Stage {
   prompt: string
   on_success: string
   on_failure: string
+  on_failure_label: string
   on_timeout: string
   env: Record<string, string>
 }
@@ -85,6 +86,7 @@ function normalizeStage(s: any): Stage {
     prompt: s.prompt || '',
     on_success: s.on_success || '',
     on_failure: s.on_failure || '',
+    on_failure_label: s.on_failure_label || '',
     on_timeout: s.on_timeout || '',
     env: s.env || (s.env_json ? JSON.parse(s.env_json) : {}),
   }
@@ -170,7 +172,7 @@ const H_GAP = 52     // gap between cards for arrows
 const ARC_BASE = 30  // minimum arc height above/below cards (px)
 const ARC_STEP = 22  // extra height per stage skipped
 
-interface GraphEdge { from: number; to: number; type: 'success' | 'failure' }
+interface GraphEdge { from: number; to: number; type: 'success' | 'failure'; failureLabel?: string }
 interface ArrowPath {
   x1: number; y1: number
   cx1: number; cy1: number
@@ -178,6 +180,7 @@ interface ArrowPath {
   x2: number; y2: number
   type: 'success' | 'failure'
   straight: boolean  // adjacent success → horizontal side-to-side line
+  failureLabel?: string
 }
 
 function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
@@ -201,9 +204,15 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
       const to = colIdx(s.on_success)
       if (to !== -1) edges.push({ from: i, to, type: 'success' })
     }
-    if (s.on_failure) {
-      const to = colIdx(s.on_failure)
-      if (to !== -1) edges.push({ from: i, to, type: 'failure' })
+    if (s.on_failure || s.on_failure_label) {
+      const to = s.on_failure ? colIdx(s.on_failure) : -1
+      // Draw arc if there's a target stage; if label-only, draw arc back to self as a stub
+      if (to !== -1) {
+        edges.push({ from: i, to, type: 'failure', failureLabel: s.on_failure_label || undefined })
+      } else if (s.on_failure_label) {
+        // Label-only: show a self-loop stub (from === to)
+        edges.push({ from: i, to: i, type: 'failure', failureLabel: s.on_failure_label })
+      }
     }
   })
 
@@ -270,7 +279,7 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
         cx2 = x2;  cy2 = trough
       }
 
-      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type, straight } as ArrowPath
+      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type, straight, failureLabel: e.failureLabel } as ArrowPath
     }).filter(Boolean) as ArrowPath[]
 
     // Height covers cards + failure arc space below
@@ -433,6 +442,21 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
                     }) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
                   </div>
                 </div>
+
+                {/* Failure label — only shown when configured */}
+                {stage.on_failure_label && (
+                  <div style={{
+                    padding:'5px 10px', borderTop:'1px solid var(--border)',
+                    background:'color-mix(in srgb, var(--red) 5%, transparent)', flexShrink:0,
+                  }}>
+                    <span style={{ fontSize:9, color:'var(--muted)', marginRight:4 }}>✗ label:</span>
+                    <span style={{
+                      fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                      background:'color-mix(in srgb, var(--red) 15%, transparent)',
+                      color:'var(--red)', border:'1px solid color-mix(in srgb, var(--red) 28%, transparent)',
+                    }}>{stage.on_failure_label}</span>
+                  </div>
+                )}
               </div>
             )
           })}
@@ -489,6 +513,16 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
                     fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
                   <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
                     fontSize="9" fontWeight="700" fill={color}>{label}</text>
+                  {/* Failure label name below the ✗ pill */}
+                  {a.failureLabel && (
+                    <>
+                      <rect x={lx - (a.failureLabel.length * 3.2 + 6) / 2} y={ly + 8}
+                        width={a.failureLabel.length * 3.2 + 6} height={12} rx={3}
+                        fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
+                      <text x={lx} y={ly + 14} textAnchor="middle" dominantBaseline="middle"
+                        fontSize="8" fontWeight="600" fill={color}>{a.failureLabel}</text>
+                    </>
+                  )}
                 </g>
               )
             })}
@@ -930,7 +964,7 @@ export default function PipelineEditor() {
     if (!pipeline) return
     const newStage: Stage = {
       column: '', actor: 'ai', agent_id: '', task_prompt: '',
-      prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
+      prompt: '', on_success: '', on_failure: '', on_failure_label: '', on_timeout: '', env: {},
     }
     update({ stages: [...pipeline.stages, newStage] })
     setSelectedStage(pipeline.stages.length)
@@ -977,7 +1011,7 @@ export default function PipelineEditor() {
         column: col,
         actor: ['Review', 'Done', 'Backlog'].some(h => col.toLowerCase().includes(h.toLowerCase())) ? 'human' : 'ai',
         agent_id: '', task_prompt: '',
-        prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
+        prompt: '', on_success: '', on_failure: '', on_failure_label: '', on_timeout: '', env: {},
       }))
       update({ stages })
       if (stages.length > 0) setSelectedStage(0)
@@ -1567,17 +1601,25 @@ export default function PipelineEditor() {
                         Stage to move issue to after a successful session.
                       </p>
                     </div>
-                    <div>
-                      <label className="form-label">On Failure →</label>
-                      <select className="form-input" value={sel.on_failure}
-                        onChange={e => updateStage(selectedStage, { on_failure: e.target.value })}>
-                        <option value="">(stay in current stage)</option>
-                        {pipeline.stages.map((s, i) => i !== selectedStage && (
-                          <option key={s.column} value={s.column}>{s.column}</option>
-                        ))}
-                      </select>
-                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
-                        Stage to move issue to after a failed session (leave blank to retry in-place).
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                      <div>
+                        <label className="form-label">On Failure → Stage</label>
+                        <select className="form-input" value={sel.on_failure}
+                          onChange={e => updateStage(selectedStage, { on_failure: e.target.value })}>
+                          <option value="">(stay in current stage)</option>
+                          {pipeline.stages.map((s, i) => i !== selectedStage && (
+                            <option key={s.column} value={s.column}>{s.column}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">On Failure → Add Label</label>
+                        <input className="form-input" value={sel.on_failure_label}
+                          placeholder="e.g. hil-failed  (optional)"
+                          onChange={e => updateStage(selectedStage, { on_failure_label: e.target.value })}/>
+                      </div>
+                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:0 }}>
+                        Applies label and/or moves issue on session failure.
                       </p>
                     </div>
                   </div>
