@@ -376,7 +376,7 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                       </div>
                     </div>
 
-                    {/* Section 3: skills */}
+                    {/* Section 3: skills + routing */}
                     <div style={{ padding:'8px 10px' }}>
                       <div style={{ display:'flex', flexWrap:'wrap', gap:3, alignItems:'center' }}>
                         {ag && ag.skills.length > 0 ? ag.skills.map((sk: string) => {
@@ -392,6 +392,27 @@ function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: B
                           <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>
                         )}
                       </div>
+                      {/* Routing row */}
+                      {(stage.on_success || stage.on_failure) && (
+                        <div style={{ marginTop:6, display:'flex', gap:6, flexWrap:'wrap' }}>
+                          {stage.on_success && (
+                            <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                              background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                              color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                              whiteSpace:'nowrap' }}>
+                              ✓ → {stage.on_success}
+                            </span>
+                          )}
+                          {stage.on_failure && (
+                            <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                              background:'color-mix(in srgb, var(--red) 12%, transparent)',
+                              color:'var(--red)', border:'1px solid color-mix(in srgb, var(--red) 25%, transparent)',
+                              whiteSpace:'nowrap' }}>
+                              ✗ → {stage.on_failure}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 

@@ -368,11 +368,23 @@ class PipelineEngine:
             )
             ended_at = datetime.now(timezone.utc).isoformat()
 
-            # Check stage progression
-            if result.exit_code == 0 and not result.timed_out:
-                result = await self._check_progression(
-                    pipeline, issue, token, result,
-                )
+            # Move issue on board based on on_success / on_failure stage config
+            on_success_col = stage_cfg.get("on_success", "") or ""
+            on_failure_col = stage_cfg.get("on_failure", "") or ""
+
+            if result.exit_code == 0 and not result.timed_out and on_success_col:
+                moved = await self._move_issue(pipeline, issue, on_success_col, token)
+                if moved:
+                    result.stage_changed = True
+                    result.new_stage = on_success_col
+                else:
+                    result.exit_code = 1  # move failed → treat as failure
+            elif (result.exit_code != 0 or result.timed_out) and on_failure_col:
+                await self._move_issue(pipeline, issue, on_failure_col, token)
+                # even if failure-move fails, we still record as failed session
+            elif result.exit_code == 0 and not result.timed_out and not on_success_col:
+                # No on_success configured — fall back to polling GitHub for progression
+                result = await self._check_progression(pipeline, issue, token, result)
 
             # Update state
             attempt_count = st.get("attempt_count", 0) + 1
@@ -690,7 +702,120 @@ class PipelineEngine:
             timed_out=timed_out,
         )
 
-    # ── Progression detection ─────────────────────────────────────────────────
+    # ── Board move ────────────────────────────────────────────────────────────
+
+    async def _move_issue(
+        self, pipeline: dict, issue: BoardIssue, target_column: str, token: str,
+    ) -> bool:
+        """Move issue to target_column on the GitHub project board via GraphQL.
+        Returns True on success, False on failure."""
+        gh_host = _gh_host_for(pipeline.get("plugin_id", ""))
+        gql_url = (
+            f"https://{gh_host}/api/graphql"
+            if gh_host != "github.com"
+            else "https://api.github.com/graphql"
+        )
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        project_owner = pipeline.get("project_owner", "")
+        project_number = pipeline.get("project_number", 0)
+        owner, repo_name = issue.repo.split("/", 1) if "/" in issue.repo else (issue.repo, "")
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                # Step 1: get project item ID and Status field/option IDs
+                q = """
+                {
+                  repository(owner: "%s", name: "%s") {
+                    issue(number: %d) { id projectItems(first: 20) {
+                      nodes { id project { number }
+                        fieldValues(first: 20) { nodes {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name field { ... on ProjectV2SingleSelectField { name } }
+                          }
+                        }}
+                      }
+                    }}
+                  }
+                  organization(login: "%s") {
+                    projectV2(number: %d) {
+                      id
+                      field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                          id options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+                """ % (owner, repo_name, issue.number, project_owner, project_number)
+
+                resp = await client.post(gql_url, headers=headers, json={"query": q})
+                data = resp.json()
+
+                if "errors" in data:
+                    logger.warning("_move_issue GQL query error for #%d: %s", issue.number, data["errors"])
+                    return False
+
+                # Extract project item ID for this issue
+                project_items = (data.get("data", {}).get("repository", {})
+                                 .get("issue", {}).get("projectItems", {}).get("nodes", []))
+                item_id = None
+                for pi in project_items:
+                    if pi.get("project", {}).get("number") == project_number:
+                        item_id = pi["id"]
+                        break
+
+                if not item_id:
+                    logger.warning("_move_issue: issue #%d not found in project %d", issue.number, project_number)
+                    return False
+
+                # Extract project ID and Status field option ID for target column
+                proj = (data.get("data", {}).get("organization", {}).get("projectV2", {}))
+                project_id = proj.get("id")
+                status_field = proj.get("field", {})
+                field_id = status_field.get("id")
+                option_id = None
+                for opt in status_field.get("options", []):
+                    if opt["name"].strip().lower() == target_column.strip().lower():
+                        option_id = opt["id"]
+                        break
+
+                if not project_id or not field_id or not option_id:
+                    logger.warning(
+                        "_move_issue: could not resolve project/field/option for column '%s' "
+                        "(project_id=%s, field_id=%s, option_id=%s)",
+                        target_column, project_id, field_id, option_id,
+                    )
+                    return False
+
+                # Step 2: move the item
+                mutation = """
+                mutation {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: "%s"
+                    itemId: "%s"
+                    fieldId: "%s"
+                    value: { singleSelectOptionId: "%s" }
+                  }) { projectV2Item { id } }
+                }
+                """ % (project_id, item_id, field_id, option_id)
+
+                resp2 = await client.post(gql_url, headers=headers, json={"query": mutation})
+                data2 = resp2.json()
+                if "errors" in data2:
+                    logger.warning("_move_issue mutation error for #%d: %s", issue.number, data2["errors"])
+                    return False
+
+                self._emit(pipeline["id"], "info",
+                    f"Moved #{issue.number} → {target_column}",
+                    issue=issue.number, stage=issue.stage)
+                return True
+
+        except Exception as e:
+            logger.warning("_move_issue failed for #%d: %s", issue.number, e)
+            return False
+
+    # ── Progression detection (fallback when on_success not configured) ────────
 
     async def _check_progression(
         self, pipeline: dict, issue: BoardIssue, token: str, result: SessionResult,
