@@ -64,6 +64,7 @@ class BoardIssue:
     stage: str
     title: str = ""
     labels: list = None  # type: ignore[assignment]
+    updated_at: str = ""
 
     def __post_init__(self):
         if self.labels is None:
@@ -272,7 +273,7 @@ class PipelineEngine:
         # Publish initial queue (actionable issues not yet active)
         def _as_dict(iss: BoardIssue) -> dict:
             return {"number": iss.number, "repo": iss.repo, "stage": iss.stage,
-                    "title": iss.title, "labels": iss.labels}
+                    "title": iss.title, "labels": iss.labels, "updated_at": iss.updated_at}
 
         actionable = [
             iss for iss in issues
@@ -471,7 +472,7 @@ class PipelineEngine:
                 nodes {
                   content {
                     ... on Issue {
-                      number title state
+                      number title state updatedAt
                       repository { nameWithOwner }
                       labels(first: 10) { nodes { name } }
                     }
@@ -547,6 +548,7 @@ class PipelineEngine:
                             stage=stage,
                             title=content.get("title", ""),
                             labels=labels,
+                            updated_at=content.get("updatedAt", ""),
                         ))
 
                 page_info = items_data.get("pageInfo", {})

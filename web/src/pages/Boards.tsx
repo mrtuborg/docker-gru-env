@@ -42,6 +42,28 @@ function partitionQueue(
   return { aiQueue, waitingHuman }
 }
 
+// ── Time formatter — compact relative + absolute fallback ─────────────────────
+
+function fmtTime(iso: string | undefined | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const diffMs = Date.now() - d.getTime()
+  const diffMin = Math.floor(diffMs / 60_000)
+  if (diffMin < 1)   return 'just now'
+  if (diffMin < 60)  return `${diffMin}m ago`
+  const diffH = Math.floor(diffMin / 60)
+  if (diffH < 24)    return `${diffH}h ago`
+  const diffD = Math.floor(diffH / 24)
+  if (diffD < 7)     return `${diffD}d ago`
+  // Older: show "Jul 2" or "Dec 31 '24"
+  const now = new Date()
+  const sameYear = d.getFullYear() === now.getFullYear()
+  const month = d.toLocaleString('en', { month: 'short' })
+  const day = d.getDate()
+  return sameYear ? `${month} ${day}` : `${month} ${day} '${String(d.getFullYear()).slice(2)}`
+}
+
 // ── Stage tag ─────────────────────────────────────────────────────────────────
 
 function StageTag({ stage }: { stage: string }) {
@@ -62,9 +84,9 @@ function StageTag({ stage }: { stage: string }) {
 // ── Issue row ─────────────────────────────────────────────────────────────────
 
 function IssueRow({ item, dim, showMeta }: { item: any; dim?: boolean; showMeta?: boolean }) {
-  const elapsed = item.started_at
-    ? Math.round((Date.now() - new Date(item.started_at).getTime()) / 1000 / 60)
-    : null
+  // Queue items carry updated_at (GitHub); recent items carry ended_at (our run)
+  const ts = item.ended_at || item.updated_at || item.started_at || null
+  const timeStr = fmtTime(ts)
 
   return (
     <div style={{
@@ -76,13 +98,17 @@ function IssueRow({ item, dim, showMeta }: { item: any; dim?: boolean; showMeta?
         <div style={{ fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {item.title || item.issue_title || item.name || item.stage || ''}
         </div>
-        {showMeta && (item.model || elapsed !== null) && (
-          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2, display: 'flex', gap: 8 }}>
-            {item.model && <span>⚡ {item.model}</span>}
-            {elapsed !== null && <span>🕐 {elapsed}m ago</span>}
+        {showMeta && item.model && (
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 2 }}>
+            <span>⚡ {item.model}</span>
           </div>
         )}
       </div>
+      {timeStr && (
+        <span style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap', flexShrink: 0 }} title={ts}>
+          {timeStr}
+        </span>
+      )}
       <StageTag stage={item.stage || item.column || '?'} />
     </div>
   )
