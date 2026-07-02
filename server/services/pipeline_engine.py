@@ -36,6 +36,7 @@ from ..config import (
     get_pipeline_state, set_pipeline_state, clear_pipeline_state,
     get_agent,
 )
+from ..connectors.analytics_connector import IAnalyticsStore
 from ..vault import load_secret
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,20 @@ def _gh_host_for(plugin_id: str) -> str:
         pass
     return os.environ.get("GH_HOST", "github.com")
 
+
+def _analytics_store_for(analytics_id: str) -> IAnalyticsStore | None:
+    """Look up the analytics connector by ID and return it as IAnalyticsStore, or None."""
+    if not analytics_id:
+        return None
+    try:
+        from ..app import connector_manager
+        if connector_manager:
+            conn = connector_manager.get(analytics_id)
+            if isinstance(conn, IAnalyticsStore):
+                return conn
+    except Exception:
+        pass
+    return None
 
 # ── Data types ────────────────────────────────────────────────────────────────
 
@@ -79,6 +94,8 @@ class SessionResult:
     new_stage: str = ""
     timed_out: bool = False
     session_id: str = ""
+    shutdown_data: dict = field(default_factory=dict)   # full session.shutdown event data
+    output_lines: list = field(default_factory=list)    # raw CLI output for log storage
 
 
 @dataclass
@@ -224,6 +241,13 @@ class PipelineEngine:
         pid = pipeline["id"]
         run_id = f"run-{uuid.uuid4().hex[:8]}"
         await create_pipeline_run(pid, run_id)
+
+        # Resolve analytics store via IAnalyticsStore interface
+        store: IAnalyticsStore | None = _analytics_store_for(
+            pipeline.get("analytics_connector_id", "")
+        )
+        if store:
+            await store.create_run(pid, run_id)
 
         stages = pipeline.get("stages", [])
         ai_stages = [s for s in stages if s.get("actor") == "ai"]
@@ -419,8 +443,8 @@ class PipelineEngine:
                     self._emit(pid, "warn",
                         f"3 consecutive failures — switching to {model_list[current_model_idx]}")
 
-            # Record run item
-            await add_pipeline_run_item(run_id, {
+            # Record run item — SQLite (legacy) + analytics store via IAnalyticsStore
+            item = {
                 "issue_number": issue.number,
                 "issue_repo": issue.repo,
                 "issue_title": issue.title,
@@ -432,11 +456,18 @@ class PipelineEngine:
                 "duration_s": result.duration_s,
                 "model": current_model or None,
                 "session_id": result.session_id or None,
-            })
+            }
+            await add_pipeline_run_item(run_id, item)  # SQLite (legacy)
+            if store:
+                await store.write_run_item(run_id, item, result.shutdown_data)
+                await store.write_session_logs(
+                    run_id, issue.number, issue.stage, result.output_lines
+                )
 
-        await finish_pipeline_run(run_id, "completed", {
-            **counts, "model": model_list[current_model_idx] if model_list else None,
-        })
+        final_counts = {**counts, "model": model_list[current_model_idx] if model_list else None}
+        await finish_pipeline_run(run_id, "completed", final_counts)
+        if store:
+            await store.finish_run(run_id, "completed", final_counts)
         self._emit(pid, "info",
             f"Pass complete: {counts['succeeded']} succeeded, "
             f"{counts['failed']} failed, {counts['skipped']} skipped")
@@ -641,6 +672,53 @@ class PipelineEngine:
         agent_file = agents_dir / f"{agent_data['id']}.agent.md"
         agent_file.write_text(content)
 
+    # ── Session shutdown reader ────────────────────────────────────────────────
+
+    def _read_session_shutdown(self, proc_wall_start: float) -> tuple[str, dict]:
+        """Find the Copilot CLI session created after proc_wall_start.
+
+        Scans ~/.copilot/session-state/ for directories whose mtime post-dates
+        the subprocess start, reads events.jsonl, and returns
+        (session_id, shutdown_data) for the most recent matching session.
+        Returns ("", {}) if nothing is found.
+        """
+        session_root = Path.home() / ".copilot" / "session-state"
+        if not session_root.exists():
+            return "", {}
+
+        candidates: list[tuple[float, Path]] = []
+        try:
+            for d in session_root.iterdir():
+                if not d.is_dir():
+                    continue
+                try:
+                    mtime = d.stat().st_mtime
+                    if mtime >= proc_wall_start:
+                        candidates.append((mtime, d))
+                except OSError:
+                    pass
+        except OSError:
+            return "", {}
+
+        candidates.sort(reverse=True)  # newest first
+        for _, session_dir in candidates:
+            events_file = session_dir / "events.jsonl"
+            if not events_file.exists():
+                continue
+            try:
+                with events_file.open() as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                            if ev.get("type") == "session.shutdown":
+                                return session_dir.name, ev.get("data", {})
+                        except json.JSONDecodeError:
+                            pass
+            except OSError:
+                pass
+
+        return "", {}
+
     # ── Session execution ─────────────────────────────────────────────────────
 
     async def _run_session(
@@ -673,6 +751,7 @@ class PipelineEngine:
             env["GH_VAULT_TOKEN"] = token  # available to skill scripts, not copilot itself
 
         start = time.monotonic()
+        wall_start = time.time()  # for locating the session-state directory
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -714,10 +793,26 @@ class PipelineEngine:
                 self._emit(pipeline["id"], "error",
                     f"Session exited {exit_code}: {preview[:200]}")
 
+        # Read session.shutdown from events.jsonl for token/cost data
+        session_id, shutdown_data = self._read_session_shutdown(wall_start)
+        if shutdown_data:
+            model_used = shutdown_data.get("currentModel", "")
+            nano_aiu = shutdown_data.get("totalNanoAiu", 0)
+            self._emit(
+                pipeline["id"], "info",
+                f"Session closed: {model_used}, "
+                f"{shutdown_data.get('totalPremiumRequests', 0)} premium req, "
+                f"{nano_aiu // 1_000_000} µAIU",
+                issue=issue.number, stage=pipeline.get("current_stage", ""),
+            )
+
         return SessionResult(
             exit_code=exit_code,
             duration_s=round(duration, 1),
             timed_out=timed_out,
+            session_id=session_id,
+            shutdown_data=shutdown_data,
+            output_lines=output_lines,
         )
 
     # ── Board move ────────────────────────────────────────────────────────────

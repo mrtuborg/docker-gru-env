@@ -198,6 +198,7 @@ async def init_db() -> None:
             "ALTER TABLE pipelines ADD COLUMN orchestrator_agent_id TEXT DEFAULT ''",
             "ALTER TABLE pipeline_run_items ADD COLUMN issue_title TEXT",
             "ALTER TABLE pipeline_stages ADD COLUMN on_failure_label TEXT DEFAULT ''",
+            "ALTER TABLE pipelines ADD COLUMN analytics_connector_id TEXT DEFAULT ''",
         ]
         for stmt in migrations:
             try:
@@ -470,8 +471,8 @@ async def upsert_pipeline(data: dict) -> None:
                    project_owner, project_number, board_path,
                    poll_interval, max_issues, max_retries, session_timeout_hours,
                    models_json, allowed_repos_json, findings_json, working_dir,
-                   orchestrator_agent_id, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   orchestrator_agent_id, analytics_connector_id, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, enabled=excluded.enabled,
                    plugin_id=excluded.plugin_id, board_type=excluded.board_type,
@@ -482,6 +483,7 @@ async def upsert_pipeline(data: dict) -> None:
                    models_json=excluded.models_json, allowed_repos_json=excluded.allowed_repos_json,
                    findings_json=excluded.findings_json, working_dir=excluded.working_dir,
                    orchestrator_agent_id=excluded.orchestrator_agent_id,
+                   analytics_connector_id=excluded.analytics_connector_id,
                    updated_at=excluded.updated_at""",
             (
                 pid, data["name"], int(data.get("enabled", True)),
@@ -495,6 +497,7 @@ async def upsert_pipeline(data: dict) -> None:
                 json.dumps(data["findings"]) if data.get("findings") else None,
                 data.get("working_dir"),
                 data.get("orchestrator_agent_id", ""),
+                data.get("analytics_connector_id", ""),
             ),
         )
         # Replace stages

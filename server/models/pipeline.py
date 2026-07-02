@@ -35,6 +35,7 @@ class PipelineCreate(BaseModel):
     name: str
     enabled: bool = True
     plugin_id: str
+    analytics_connector_id: Optional[str] = ""   # links to AnalyticsConnector instance
     board_type: str = "github"
     project_owner: Optional[str] = None
     project_number: Optional[int] = None
@@ -68,3 +69,4 @@ class PipelineUpdate(BaseModel):
     findings: Optional[FindingsBoard] = None
     working_dir: Optional[str] = None
     orchestrator_agent_id: Optional[str] = None
+    analytics_connector_id: Optional[str] = ""  # links to AnalyticsConnector instance

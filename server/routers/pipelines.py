@@ -16,12 +16,23 @@ from pydantic import BaseModel
 
 from ..config import (
     get_pipeline, list_pipelines, upsert_pipeline, delete_pipeline,
-    list_pipeline_runs, get_pipeline_run_items, get_pipeline_sessions,
-    get_issue_run_history,
+    list_pipeline_runs, get_pipeline_run_items,
     clear_pipeline_state, get_pipeline_state,
 )
+from ..connectors.analytics_connector import IAnalyticsStore
 from ..models.pipeline import PipelineCreate, PipelineUpdate
 from ..vault import load_secret
+
+
+def _get_analytics_store(request: Request, pipeline: dict) -> IAnalyticsStore | None:
+    """Return the IAnalyticsStore for a pipeline, or None if not configured."""
+    analytics_id = pipeline.get("analytics_connector_id", "")
+    if not analytics_id:
+        return None
+    conn = request.app.state.connectors.get(analytics_id)
+    if isinstance(conn, IAnalyticsStore):
+        return conn
+    return None
 
 router = APIRouter()
 
@@ -249,19 +260,50 @@ async def get_run_items(pipeline_id: str, run_id: str):
 
 
 @router.get("/{pipeline_id}/sessions")
-async def get_sessions(pipeline_id: str, days: int = 7):
+async def get_sessions(pipeline_id: str, days: int = 7, request: Request = None):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
-    return await get_pipeline_sessions(pipeline_id, days)
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return {"summary": {}, "sessions": [], "analytics_unavailable": True}
+    return await store.read_sessions(pipeline_id, days)
 
 
 @router.get("/{pipeline_id}/issues/{issue_number}/history")
-async def get_issue_history(pipeline_id: str, issue_number: int):
+async def get_issue_history(pipeline_id: str, issue_number: int, request: Request = None):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
-    return await get_issue_run_history(pipeline_id, issue_number)
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return []
+    return await store.read_issue_history(pipeline_id, issue_number)
+
+
+@router.get("/{pipeline_id}/issues/{issue_number}/session-logs")
+async def get_issue_session_logs(
+    pipeline_id: str, issue_number: int,
+    run_id: str = "", stage: str = "",
+    request: Request = None,
+):
+    """Return stored Copilot CLI log lines. Defaults to the most recent run."""
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return []
+
+    if not run_id:
+        history = await store.read_issue_history(pipeline_id, issue_number)
+        if not history:
+            return []
+        run_id = history[0]["run_id"]
+        if not stage:
+            stage = history[0]["stage"]
+
+    return await store.read_session_logs(run_id, issue_number, stage or None)
 
 
 @router.get("/{pipeline_id}/state")

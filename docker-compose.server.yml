@@ -1,6 +1,25 @@
 version: "3.9"
 
 services:
+  gru-analytics-db:
+    image: postgres:16-alpine
+    container_name: gru-analytics-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gru
+      POSTGRES_PASSWORD: gru
+      POSTGRES_DB: gru_analytics
+    volumes:
+      - gru-analytics-data:/var/lib/postgresql/data
+    networks:
+      - gru-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gru -d gru_analytics"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   gru-server:
     build:
       context: .
@@ -16,9 +35,15 @@ services:
     environment:
       GRU_DATA_DIR: /data
       GRU_PORT: 9400
+      ANALYTICS_DB_URL: postgresql://gru:gru@gru-analytics-db:5432/gru_analytics
       # GitHub OAuth App credentials (register at https://github.com/settings/developers)
       # GRU_GITHUB_CLIENT_ID: ""
       # For GitHub Enterprise: GRU_GITHUB_<HOST_UPPER>_CLIENT_ID: ""
+    networks:
+      - gru-network
+    depends_on:
+      gru-analytics-db:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9400/api/wizard/status"]
       interval: 30s
@@ -26,6 +51,13 @@ services:
       retries: 3
       start_period: 15s
 
+networks:
+  gru-network:
+    name: gru-network
+    driver: bridge
+
 volumes:
   gru-data:
+    driver: local
+  gru-analytics-data:
     driver: local
