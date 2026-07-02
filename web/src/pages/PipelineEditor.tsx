@@ -136,6 +136,7 @@ function exportYaml(p: PipelineData): string {
       if (s.prompt) lines.push(`    prompt: ${yamlStr(s.prompt, 4)}`)
       if (s.on_success) lines.push(`    on_success: ${yamlStr(s.on_success, 4)}`)
       if (s.on_failure) lines.push(`    on_failure: ${yamlStr(s.on_failure, 4)}`)
+      if (s.on_failure_label) lines.push(`    on_failure_label: ${yamlStr(s.on_failure_label, 4)}`)
       if (s.on_timeout) lines.push(`    on_timeout: ${yamlStr(s.on_timeout, 4)}`)
       if (Object.keys(s.env).length > 0) {
         lines.push('    env:')

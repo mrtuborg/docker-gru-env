@@ -25,6 +25,7 @@ class PipelineStage(BaseModel):
     prompt: str = ""
     on_success: str = ""
     on_failure: str = ""
+    on_failure_label: str = ""
     on_timeout: str = ""
     env: Dict[str, str] = Field(default_factory=dict)
 
