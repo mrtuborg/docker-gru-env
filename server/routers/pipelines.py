@@ -16,7 +16,7 @@ from pydantic import BaseModel
 
 from ..config import (
     get_pipeline, list_pipelines, upsert_pipeline, delete_pipeline,
-    list_pipeline_runs, get_pipeline_run_items,
+    list_pipeline_runs, get_pipeline_run_items, get_pipeline_sessions,
     clear_pipeline_state, get_pipeline_state,
 )
 from ..models.pipeline import PipelineCreate, PipelineUpdate
@@ -245,6 +245,14 @@ async def get_runs(pipeline_id: str, limit: int = 50):
 @router.get("/{pipeline_id}/runs/{run_id}/items")
 async def get_run_items(pipeline_id: str, run_id: str):
     return await get_pipeline_run_items(run_id)
+
+
+@router.get("/{pipeline_id}/sessions")
+async def get_sessions(pipeline_id: str, days: int = 7):
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    return await get_pipeline_sessions(pipeline_id, days)
 
 
 @router.get("/{pipeline_id}/state")
