@@ -19,6 +19,12 @@ PORT="${GRU_PORT:-9400}"
 VOLUME="gru-data"
 AZURE_DIR="$HOME/.azure"
 
+# Analytics DB (PostgreSQL)
+ANALYTICS_CONTAINER="gru-analytics-db"
+ANALYTICS_VOLUME="gru-analytics-data"
+ANALYTICS_NETWORK="gru-network"
+ANALYTICS_DB_URL="postgresql://gru:gru@${ANALYTICS_CONTAINER}:5432/gru_analytics"
+
 FRESH=0
 REBUILD=0
 SEED_CONFIG=""
@@ -79,10 +85,40 @@ find_free_port() {
 }
 PORT=$(find_free_port "$PORT")
 
+# ── Start analytics DB (PostgreSQL) ──────────────────────────────────────────
+docker network create "$ANALYTICS_NETWORK" 2>/dev/null || true
+
+if docker inspect "$ANALYTICS_CONTAINER" &>/dev/null; then
+  # Reconnect to network in case it was disconnected
+  docker start "$ANALYTICS_CONTAINER" 2>/dev/null || true
+  docker network connect "$ANALYTICS_NETWORK" "$ANALYTICS_CONTAINER" 2>/dev/null || true
+  echo "✓ Analytics DB already running ($ANALYTICS_CONTAINER)"
+else
+  echo "▶ Starting analytics DB ($ANALYTICS_CONTAINER) …"
+  docker run -d \
+    --name "$ANALYTICS_CONTAINER" \
+    --network "$ANALYTICS_NETWORK" \
+    -v "${ANALYTICS_VOLUME}:/var/lib/postgresql/data" \
+    -e POSTGRES_USER=gru \
+    -e POSTGRES_PASSWORD=gru \
+    -e POSTGRES_DB=gru_analytics \
+    postgres:16-alpine
+  echo "  Waiting for postgres to be ready …"
+  for i in $(seq 1 20); do
+    if docker exec "$ANALYTICS_CONTAINER" pg_isready -U gru -q 2>/dev/null; then
+      echo "✓ Analytics DB ready"
+      break
+    fi
+    sleep 1
+  done
+fi
+
 # ── Start container ───────────────────────────────────────────────────────────
 if docker inspect "$CONTAINER" &>/dev/null; then
   echo "▶ Starting existing container $CONTAINER …"
   docker start "$CONTAINER"
+  # Ensure it's on the analytics network
+  docker network connect "$ANALYTICS_NETWORK" "$CONTAINER" 2>/dev/null || true
 
   # Run seed against already-running container if requested
   if [[ -n "$SEED_CONFIG" ]]; then
@@ -98,6 +134,12 @@ else
   AZURE_MOUNT=()
   [[ -d "$AZURE_DIR" ]] && AZURE_MOUNT=(-v "$AZURE_DIR:/root/.azure")
 
+  # Mount the roommate-sensei-o workspace so Copilot sessions can access
+  # hil-stress scripts (skills/, roomboard-tests/, etc.) at /workspace
+  WORKSPACE_MOUNT=()
+  WORKSPACE_HOST="/Users/vn/ws/roommate-sensei-o"
+  [[ -d "$WORKSPACE_HOST" ]] && WORKSPACE_MOUNT=(-v "$WORKSPACE_HOST:/workspace:ro")
+
   CONFIG_MOUNT=()
   SEED_ENVS=()
   if [[ -n "$SEED_CONFIG" ]]; then
@@ -111,9 +153,12 @@ else
 
   docker run -d \
     --name "$CONTAINER" \
+    --network "$ANALYTICS_NETWORK" \
     -p "${PORT}:9400" \
     -v "${VOLUME}:/data" \
+    -e "ANALYTICS_DB_URL=${ANALYTICS_DB_URL}" \
     "${AZURE_MOUNT[@]+"${AZURE_MOUNT[@]}"}" \
+    "${WORKSPACE_MOUNT[@]+"${WORKSPACE_MOUNT[@]}"}" \
     "${CONFIG_MOUNT[@]+"${CONFIG_MOUNT[@]}"}" \
     "${SEED_ENVS[@]+"${SEED_ENVS[@]}"}" \
     "$IMAGE"
