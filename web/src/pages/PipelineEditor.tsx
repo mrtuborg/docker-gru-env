@@ -167,7 +167,17 @@ function toolColor(tool: string): string {
 const CARD_W = 164
 const H_GAP = 52     // gap between cards for arrows
 
+const ARC_BASE = 30  // minimum arc height above/below cards (px)
+const ARC_STEP = 22  // extra height per stage skipped
+
 interface GraphEdge { from: number; to: number; type: 'success' | 'failure' }
+interface ArrowPath {
+  x1: number; y1: number
+  cx1: number; cy1: number
+  cx2: number; cy2: number
+  x2: number; y2: number
+  type: 'success' | 'failure'
+}
 
 function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
   pipeline: PipelineData
@@ -177,7 +187,7 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
 }) {
   const cardRefs = useRef<(HTMLDivElement | null)[]>([])
   const containerRef = useRef<HTMLDivElement>(null)
-  const [arrows, setArrows] = useState<{ x1:number; y1:number; x2:number; y2:number; type:'success'|'failure'; arc:number }[]>([])
+  const [arrows, setArrows] = useState<ArrowPath[]>([])
   const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
 
   const stages = pipeline.stages
@@ -196,7 +206,17 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
     }
   })
 
-  // Measure card positions and compute SVG arrow paths
+  // Pre-compute padding from edge structure (no circular dependency with layout)
+  const maxSuccessSkip = Math.max(0, ...edges.filter(e => e.type === 'success').map(e => Math.abs(e.to - e.from)))
+  const maxFailureSkip = Math.max(0, ...edges.filter(e => e.type === 'failure').map(e => Math.abs(e.to - e.from)))
+  const svgPaddingTop = edges.some(e => e.type === 'success') ? ARC_BASE + maxSuccessSkip * ARC_STEP + 14 : 10
+  const svgPaddingBottom = edges.some(e => e.type === 'failure') ? ARC_BASE + maxFailureSkip * ARC_STEP + 14 : 10
+
+  const edgeKey = edges.map(e => `${e.from}-${e.to}-${e.type}`).join(',')
+
+  // Measure card positions and compute cubic-bezier arrow paths.
+  // Success arrows: top-center anchors, arc ABOVE cards (no card overlap).
+  // Failure arrows: bottom-center anchors, arc BELOW cards.
   const measureArrows = useCallback(() => {
     const container = containerRef.current
     if (!container) return
@@ -216,27 +236,37 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
       const tr = rects[e.to]
       if (!fr || !tr) return null
 
-      const isForward = e.to > e.from
-      const isAdjacent = Math.abs(e.to - e.from) === 1
+      const skip = Math.abs(e.to - e.from)
+      const arcH = ARC_BASE + skip * ARC_STEP
 
-      const x1 = fr.x + fr.w
-      const y1 = fr.y + fr.h / 2
-      const x2 = tr.x
-      const y2 = tr.y + tr.h / 2
+      let x1, y1, cx1, cy1, cx2, cy2, x2, y2
 
-      const skip = Math.abs(e.to - e.from) - 1
-      const arc = isAdjacent ? 0 : (isForward ? -(skip * 30 + 20) : (skip * 30 + 20))
+      if (e.type === 'success') {
+        // Anchor at top-center; control points arc above
+        x1 = fr.x + fr.w / 2;  y1 = fr.y
+        x2 = tr.x + tr.w / 2;  y2 = tr.y
+        const peak = Math.min(y1, y2) - arcH
+        cx1 = x1;  cy1 = peak
+        cx2 = x2;  cy2 = peak
+      } else {
+        // Anchor at bottom-center; control points arc below
+        x1 = fr.x + fr.w / 2;  y1 = fr.y + fr.h
+        x2 = tr.x + tr.w / 2;  y2 = tr.y + tr.h
+        const trough = Math.max(y1, y2) + arcH
+        cx1 = x1;  cy1 = trough
+        cx2 = x2;  cy2 = trough
+      }
 
-      return { x1, y1, x2, y2, type: e.type, arc }
-    }).filter(Boolean) as typeof arrows
+      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type } as ArrowPath
+    }).filter(Boolean) as ArrowPath[]
 
-    setSvgSize({ w: maxRight + 20, h: maxBottom + Math.abs(Math.min(0, ...computed.map(a => a.arc))) + 40 })
+    // Height covers cards + failure arc space below
+    setSvgSize({ w: maxRight + 20, h: maxBottom + svgPaddingBottom + 20 })
     setArrows(computed)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [edges.map(e => `${e.from}-${e.to}-${e.type}`).join(',')])
+  }, [edgeKey, svgPaddingTop, svgPaddingBottom])
 
-  // Use layout effect + ResizeObserver so arrows re-measure when card heights
-  // change (agent data loads, lint errors appear, content changes).
+  // Re-measure whenever card heights change (agent data loads, etc.)
   useLayoutEffect(() => {
     measureArrows()
     const container = containerRef.current
@@ -246,8 +276,6 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
     cardRefs.current.forEach(el => { if (el) ro.observe(el) })
     return () => ro.disconnect()
   }, [measureArrows])
-
-  const svgPaddingTop = Math.abs(Math.min(0, ...arrows.map(a => a.arc), 0)) + 10
 
   if (stages.length === 0) {
     return (
@@ -259,10 +287,10 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
   }
 
   return (
-    <div style={{ overflowX:'auto', paddingBottom:8 }}>
+    <div style={{ overflowX:'auto', paddingBottom: svgPaddingBottom + 8 }}>
       <div ref={containerRef} style={{ position:'relative', display:'inline-block', minWidth:'max-content' }}>
-        {/* Cards row — stretch equalises all card heights so arrows stay horizontal */}
-        <div style={{ display:'flex', alignItems:'stretch', gap: H_GAP, paddingTop: svgPaddingTop }}>
+        {/* Cards row — top/bottom padding reserves space for success/failure arcs */}
+        <div style={{ display:'flex', alignItems:'stretch', gap: H_GAP, paddingTop: svgPaddingTop, paddingBottom: svgPaddingBottom }}>
           {stages.map((stage, i) => {
             const ag = stage.agent_id ? agentMap[stage.agent_id] : null
             const isHuman = stage.actor === 'human'
@@ -397,18 +425,18 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
           })}
         </div>
 
-        {/* SVG arrow overlay */}
+        {/* SVG arrow overlay — success arcs ABOVE cards, failure arcs BELOW */}
         {arrows.length > 0 && (
           <svg
             style={{ position:'absolute', top:0, left:0, pointerEvents:'none', overflow:'visible' }}
-            width={svgSize.w} height={svgSize.h + svgPaddingTop}
+            width={svgSize.w} height={svgSize.h}
           >
             <defs>
-              <marker id="arrow-success" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="var(--green)" />
+              <marker id="arrow-success" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0.5 L0,6.5 L7,3.5 z" fill="var(--green)" />
               </marker>
-              <marker id="arrow-failure" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L7,3 z" fill="var(--red)" />
+              <marker id="arrow-failure" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0.5 L0,6.5 L7,3.5 z" fill="var(--red)" />
               </marker>
             </defs>
             {arrows.map((a, idx) => {
@@ -416,47 +444,25 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
               const color = isSuccess ? 'var(--green)' : 'var(--red)'
               const markerId = isSuccess ? 'arrow-success' : 'arrow-failure'
               const label = isSuccess ? '✓' : '✗'
-              const adjY = a.y1 + svgPaddingTop
-              const adjY2 = a.y2 + svgPaddingTop
 
-              if (a.arc === 0) {
-                // Straight horizontal arrow — adjacent stages at equal height, same Y
-                const mx = (a.x1 + a.x2) / 2
-                const ly = adjY - 7
-                return (
-                  <g key={idx}>
-                    <line
-                      x1={a.x1 + 1} y1={adjY} x2={a.x2 - 6} y2={adjY}
-                      stroke={color} strokeWidth="1.5" markerEnd={`url(#${markerId})`}
-                    />
-                    {/* Label pill */}
-                    <rect x={mx - 7} y={ly - 8} width={14} height={12} rx={3}
-                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.95" />
-                    <text x={mx} y={ly} textAnchor="middle"
-                      fontSize="9" fontWeight="700" fill={color}>{label}</text>
-                  </g>
-                )
-              } else {
-                // Cubic bezier arc — non-adjacent connections
-                const cy = adjY + a.arc
-                const cy2 = adjY2 + a.arc
-                const mx = (a.x1 + a.x2) / 2
-                const pathD = `M ${a.x1} ${adjY} C ${a.x1 + 24} ${cy}, ${a.x2 - 24} ${cy2}, ${a.x2} ${adjY2}`
-                const lx = mx
-                const ly = (adjY + adjY2) / 2 + a.arc * 0.85
-                return (
-                  <g key={idx}>
-                    <path d={pathD} fill="none" stroke={color} strokeWidth="1.5"
-                      markerEnd={`url(#${markerId})`}
-                      strokeDasharray={isSuccess ? undefined : '5 3'}
-                    />
-                    <rect x={lx - 7} y={ly - 8} width={14} height={12} rx={3}
-                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.95" />
-                    <text x={lx} y={ly} textAnchor="middle"
-                      fontSize="9" fontWeight="700" fill={color}>{label}</text>
-                  </g>
-                )
-              }
+              // Bezier midpoint at t=0.5: B(0.5) = (P0 + 3P1 + 3P2 + P3) / 8
+              const lx = (a.x1 + 3 * a.cx1 + 3 * a.cx2 + a.x2) / 8
+              const ly = (a.y1 + 3 * a.cy1 + 3 * a.cy2 + a.y2) / 8
+
+              const d = `M ${a.x1} ${a.y1} C ${a.cx1} ${a.cy1}, ${a.cx2} ${a.cy2}, ${a.x2} ${a.y2}`
+              return (
+                <g key={idx}>
+                  <path d={d} fill="none" stroke={color} strokeWidth="1.5"
+                    markerEnd={`url(#${markerId})`}
+                    strokeDasharray={isSuccess ? undefined : '5 3'}
+                  />
+                  {/* Label pill at bezier midpoint */}
+                  <rect x={lx - 8} y={ly - 7} width={16} height={13} rx={3}
+                    fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
+                  <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+                    fontSize="9" fontWeight="700" fill={color}>{label}</text>
+                </g>
+              )
             })}
           </svg>
         )}
