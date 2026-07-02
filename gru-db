@@ -90,7 +90,7 @@ do_start() {
       "${port_args[@]+"${port_args[@]}"}" \
       -v "${VOLUME}:/var/lib/postgresql/data" \
       -e POSTGRES_USER=gru \
-      -e POSTGRES_PASSWORD=gru \
+      -e POSTGRES_HOST_AUTH_METHOD=trust \
       -e POSTGRES_DB=gru_analytics \
       postgres:16-alpine
   fi

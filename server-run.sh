@@ -23,7 +23,7 @@ AZURE_DIR="$HOME/.azure"
 ANALYTICS_CONTAINER="gru-analytics-db"
 ANALYTICS_VOLUME="gru-analytics-data"
 ANALYTICS_NETWORK="gru-network"
-ANALYTICS_DB_URL="postgresql://gru:gru@${ANALYTICS_CONTAINER}:5432/gru_analytics"
+ANALYTICS_DB_URL="postgresql://gru@${ANALYTICS_CONTAINER}:5432/gru_analytics"
 
 FRESH=0
 REBUILD=0
@@ -100,7 +100,7 @@ else
     --network "$ANALYTICS_NETWORK" \
     -v "${ANALYTICS_VOLUME}:/var/lib/postgresql/data" \
     -e POSTGRES_USER=gru \
-    -e POSTGRES_PASSWORD=gru \
+    -e POSTGRES_HOST_AUTH_METHOD=trust \
     -e POSTGRES_DB=gru_analytics \
     postgres:16-alpine
   echo "  Waiting for postgres to be ready …"
