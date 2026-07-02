@@ -79,10 +79,13 @@ do_start() {
 
   if container_exists; then
     if [[ -n "$HOST_PORT" ]]; then
-      echo "⚠  Container already exists — port mappings are fixed at creation time."
-      echo "   To bind port $HOST_PORT, recreate the container:"
-      echo "   ./gru-server fresh --port $HOST_PORT"
-      exit 1
+      local mapped; mapped=$(docker inspect --format '{{range $p,$v := .HostConfig.PortBindings}}{{range $v}}{{.HostPort}} {{end}}{{end}}' "$CONTAINER" 2>/dev/null)
+      if ! echo "$mapped" | grep -qw "$HOST_PORT"; then
+        echo "⚠  Container already exists without port $HOST_PORT mapped."
+        echo "   To bind port $HOST_PORT, recreate the container:"
+        echo "   ./gru-server fresh --port $HOST_PORT"
+        exit 1
+      fi
     fi
     echo "▶ Starting $CONTAINER …"
     docker start "$CONTAINER"
