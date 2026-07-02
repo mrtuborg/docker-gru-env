@@ -232,6 +232,34 @@ CREATE INDEX IF NOT EXISTS session_logs_run
     ON session_logs (run_id, issue_number, stage);
 CREATE INDEX IF NOT EXISTS session_logs_ts
     ON session_logs (ts DESC);
+
+-- Projects — groups sessions (pipeline_run_items) the way the dashboard
+-- groups them, independent of which gru pipeline produced the data. See
+-- docker/analytics-db/initdb/002-projects.sql for the authoritative version
+-- (the DB-native web UI applies that file directly; this copy just keeps
+-- gru-server's own connector able to create the same schema from scratch).
+CREATE TABLE IF NOT EXISTS projects (
+    id           SERIAL      PRIMARY KEY,
+    number       INTEGER,
+    slug         TEXT        NOT NULL UNIQUE,
+    title        TEXT        NOT NULL,
+    repo         TEXT,
+    is_unlinked  BOOLEAN     NOT NULL DEFAULT FALSE,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS projects_number_uniq
+    ON projects (number) WHERE number IS NOT NULL;
+INSERT INTO projects (slug, title, is_unlinked)
+    VALUES ('unlinked', 'Unlinked Sessions', TRUE)
+    ON CONFLICT (slug) DO NOTHING;
+
+ALTER TABLE pipeline_runs
+    ADD COLUMN IF NOT EXISTS project_id INTEGER REFERENCES projects(id);
+CREATE INDEX IF NOT EXISTS pipeline_runs_project
+    ON pipeline_runs (project_id);
+
+ALTER TABLE pipeline_run_items
+    ADD COLUMN IF NOT EXISTS branch TEXT;
 """
 
 
