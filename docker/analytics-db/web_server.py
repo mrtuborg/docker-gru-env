@@ -1667,22 +1667,32 @@ def fetch_project(project_id: int, is_unlinked: bool) -> dict:
         ]
 
     def _issue_row_out(r):
+        sessions = _num(r["sessions"], int)
+        items_with_premium = _num(r["items_with_premium"], int)
+        items_with_cost = _num(r["items_with_cost"], int)
         return {
             "issue_repo": r["issue_repo"],
             "issue_number": _num(r["issue_number"], int),
-            "sessions": _num(r["sessions"], int),
-            "premium_requests": _num(r["premium_requests"], int) if _num(r["items_with_premium"], int) else None,
-            "cost_usd": _num(r["cost_usd"]) if _num(r["items_with_cost"], int) else None,
+            "sessions": sessions,
+            "premium_requests": _num(r["premium_requests"], int) if items_with_premium else None,
+            "cost_usd": _num(r["cost_usd"]) if items_with_cost else None,
+            "items_with_cost": items_with_cost,
+            "items_with_premium": items_with_premium,
             "top_model": _opt(r["top_model"]),
         }
 
     def _repo_row_out(r):
+        sessions = _num(r["sessions"], int)
+        items_with_premium = _num(r["items_with_premium"], int)
+        items_with_cost = _num(r["items_with_cost"], int)
         return {
             "issue_repo": r["issue_repo"],
             "branch": r["branch"],
-            "sessions": _num(r["sessions"], int),
-            "premium_requests": _num(r["premium_requests"], int) if _num(r["items_with_premium"], int) else None,
-            "cost_usd": _num(r["cost_usd"]) if _num(r["items_with_cost"], int) else None,
+            "sessions": sessions,
+            "premium_requests": _num(r["premium_requests"], int) if items_with_premium else None,
+            "cost_usd": _num(r["cost_usd"]) if items_with_cost else None,
+            "items_with_cost": items_with_cost,
+            "items_with_premium": items_with_premium,
             "top_model": _opt(r["top_model"]),
         }
 
@@ -1778,13 +1788,30 @@ def _stat_div(value: str, label: str, count: int | None = None) -> str:
     return f'<div class="stat"><div class="stat-value"{attr}>{html.escape(value)}</div><div class="stat-label">{html.escape(label)}</div></div>'
 
 
-def _bar_cell(value: float | None, max_value: float, fmt: str) -> str:
+def _bar_cell(value: float | None, max_value: float, fmt: str, partial: bool = False) -> str:
     """The reference's inline mini-bar-chart table cell: a fractional-width
-    fill bar plus a numeric label, or an empty '—' bar when value is None."""
+    fill bar plus a numeric label, or an empty '—' bar when value is None.
+    When `partial` is True the aggregate only reflects SOME of the underlying
+    rows (e.g. some sessions have no cost_usd) — the reference prefixes such
+    approximate sums with a '~' to distinguish them from fully-known totals."""
     if value is None:
         return '<div class="bar-wrap"><div class="bar-fill" style="width:0%"></div><span class="bar-label">—</span></div>'
     pct = round(value / max_value * 100) if max_value > 0 else 0
-    return f'<div class="bar-wrap"><div class="bar-fill" style="width:{pct}%"></div><span class="bar-label">{html.escape(fmt.format(value))}</span></div>'
+    label = ("~" if partial else "") + fmt.format(value)
+    return f'<div class="bar-wrap"><div class="bar-fill" style="width:{pct}%"></div><span class="bar-label">{html.escape(label)}</span></div>'
+
+
+def _coverage_conf(items_with: int | None, total: int | None) -> str:
+    """Confidence tier for an aggregate, based on how many of its underlying
+    rows have the metric known: 'exact' (all known), 'low' (some known), or
+    'unknown' (none known)."""
+    items_with = items_with or 0
+    total = total or 0
+    if total <= 0 or items_with <= 0:
+        return "unknown"
+    if items_with >= total:
+        return "exact"
+    return "low"
 
 
 def _conf_cell(conf: str) -> str:
@@ -1804,7 +1831,8 @@ def render_index(data: dict) -> str:
     total_sessions = sum(p["sessions"] for p in projects)
     total_cost = sum(p["cost_usd"] for p in projects)
     any_cost = any(p["items_with_cost"] for p in projects)
-    cost_display = f"${total_cost:.2f}" if any_cost else "no data"
+    total_sessions_with_cost = sum(p["items_with_cost"] for p in projects)
+    cost_display = (("~" if 0 < total_sessions_with_cost < total_sessions else "") + f"${total_cost:.2f}") if any_cost else "no data"
 
     meta_line = f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')} &nbsp;\u00b7&nbsp; {len(projects)} project(s)"
 
@@ -1819,7 +1847,7 @@ def render_index(data: dict) -> str:
         cls = "proj-card proj-card-unlinked" if p["is_unlinked"] else "proj-card"
         href = "/project/unlinked" if p["is_unlinked"] else f"/project/{p['id']}"
         num_label = "\u2205" if p["is_unlinked"] else f"#{p['number'] if p['number'] is not None else p['id']}"
-        cost_val = f"${p['cost_usd']:.2f}" if p["items_with_cost"] else EMDASH
+        cost_val = (("~" if 0 < p["items_with_cost"] < p["sessions"] else "") + f"${p['cost_usd']:.2f}") if p["items_with_cost"] else EMDASH
         premium_val = str(p["premium_requests"]) if p["items_with_premium"] else EMDASH
         issues_val = str(p["issues"]) if p["issues"] else EMDASH
         cards.append(f"""<a class="{cls}" href="{href}">
@@ -1919,7 +1947,7 @@ def render_project(project: dict, data: dict) -> str:
     title = "\u2205 Unlinked Sessions" if project["is_unlinked"] else f"{html.escape(project['title'])} (#{project['number'] if project['number'] is not None else project['id']})"
     meta_line = f"Generated {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')} &nbsp;\u00b7&nbsp; {s['sessions']} session(s) loaded"
 
-    cost_display = f"${s['cost_usd']:.4f}" if s["cost_usd"] is not None else "no data"
+    cost_display = (("~" if 0 < s["items_with_cost"] < s["sessions"] else "") + f"${s['cost_usd']:.4f}") if s["cost_usd"] is not None else "no data"
     premium_display = str(s["premium_requests"]) if s["premium_requests"] is not None else EMDASH
     tokens_display = fmt_tokens(s["total_tokens"]) if s["total_tokens"] else EMDASH
     metrics_display = f"{s['items_with_tokens']}/{s['sessions']}" if s["sessions"] else "0/0"
@@ -1946,8 +1974,8 @@ def render_project(project: dict, data: dict) -> str:
                 f'<tr><td>#{r["issue_number"]}</td>'
                 f'<td class="num">{r["sessions"]}</td>'
                 f'<td class="num">{r["premium_requests"] if r["premium_requests"] is not None else EMDASH}</td>'
-                f'<td>{_bar_cell(r["cost_usd"], max_cost, "${:.4f}")}</td>'
-                f'{_conf_cell("exact" if r["cost_usd"] is not None else "unknown")}'
+                f'<td>{_bar_cell(r["cost_usd"], max_cost, "${:.4f}", partial=0 < (r["items_with_cost"] or 0) < r["sessions"])}</td>'
+                f'{_conf_cell(_coverage_conf(r["items_with_premium"], r["sessions"]))}'
                 f'{_model_cell(model_display_name(r["top_model"]) if r["top_model"] else None)}</tr>'
             )
         return "\n".join(out)
@@ -1963,7 +1991,7 @@ def render_project(project: dict, data: dict) -> str:
                 f'<td class="mono">{html.escape(r["branch"])}</td>'
                 f'<td class="num">{r["sessions"]}</td>'
                 f'<td class="num">{r["premium_requests"] if r["premium_requests"] is not None else EMDASH}</td>'
-                f'<td>{_bar_cell(r["cost_usd"], max_cost, "${:.4f}")}</td>'
+                f'<td>{_bar_cell(r["cost_usd"], max_cost, "${:.4f}", partial=0 < (r["items_with_cost"] or 0) < r["sessions"])}</td>'
                 f'{_model_cell(model_display_name(r["top_model"]) if r["top_model"] else None)}</tr>'
             )
         return "\n".join(out)
