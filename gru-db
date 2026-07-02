@@ -87,8 +87,8 @@ do_start() {
 
   local port_args=()
   if [[ -n "$HOST_PORT" ]]; then
-    port_args=(-p "${HOST_PORT}:5432")
-    echo "▶ Creating $CONTAINER (postgres exposed on host:$HOST_PORT) …"
+    port_args=(-p "127.0.0.1:${HOST_PORT}:5432")
+    echo "▶ Creating $CONTAINER (postgres on 127.0.0.1:$HOST_PORT) …"
   else
     echo "▶ Creating $CONTAINER (not exposed to host) …"
   fi

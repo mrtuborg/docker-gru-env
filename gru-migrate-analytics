@@ -63,16 +63,17 @@ def find_shutdown_for_window(started_at_str, ended_at_str):
     candidates = []
     for d in SESSION_STATE.iterdir():
         if not d.is_dir(): continue
+        events_file = d / "events.jsonl"
+        if not events_file.exists(): continue
         try:
-            mt = d.stat().st_mtime
+            mt = events_file.stat().st_mtime   # use file mtime, not directory mtime
             if t_start <= mt <= t_end:
-                candidates.append((mt, d))
+                candidates.append((mt, events_file))
         except OSError:
             pass
     candidates.sort(reverse=True)
-    for _, session_dir in candidates:
-        events_file = session_dir / "events.jsonl"
-        if not events_file.exists(): continue
+    for _, events_file in candidates:
+        session_dir = events_file.parent
         try:
             with events_file.open() as f:
                 for line in f:
