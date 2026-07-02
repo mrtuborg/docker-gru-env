@@ -296,6 +296,8 @@ class AnalyticsConnector(GruConnector):
             await store_secret(self.plugin_id, "password", config["password"])
             config.pop("password", None)  # never keep password in plain config
 
+        # Close existing pool so _connect() rebuilds with new connection params
+        await self.teardown()
         await self._connect()
 
     async def _connect(self) -> None:
@@ -604,10 +606,16 @@ class AnalyticsConnector(GruConnector):
                     "total_api_requests":     int(agg.get("total_api_requests")    or 0),
                     "total_lines_added":      int(agg.get("total_lines_added")     or 0),
                     "total_lines_removed":    int(agg.get("total_lines_removed")   or 0),
-                    "by_stage": {k: {kk: (float(vv) if vv is not None else None)
-                                     for kk, vv in v.items()} for k, v in by_stage.items()},
-                    "by_model": {k: {kk: (float(vv) if vv is not None else None)
-                                     for kk, vv in v.items()} for k, v in by_model.items()},
+                    "by_stage": {
+                        k: {kk: (float(vv) if isinstance(vv, (int, float)) else vv)
+                            for kk, vv in v.items()}
+                        for k, v in by_stage.items()
+                    },
+                    "by_model": {
+                        k: {kk: (float(vv) if isinstance(vv, (int, float)) else vv)
+                            for kk, vv in v.items()}
+                        for k, v in by_model.items()
+                    },
                 },
                 "sessions": sessions,
             }
@@ -627,6 +635,7 @@ class AnalyticsConnector(GruConnector):
                     """SELECT ri.run_id, ri.stage, ri.status,
                               ri.started_at::text, ri.ended_at::text,
                               ri.duration_s, ri.model, ri.cost_usd, ri.session_id,
+                              ri.error_message,
                               ri.tokens_input, ri.tokens_output, ri.tokens_cache_read,
                               ri.tokens_reasoning, ri.total_input_tokens,
                               ri.nano_aiu, ri.premium_requests, ri.api_requests,

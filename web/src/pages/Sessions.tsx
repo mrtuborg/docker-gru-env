@@ -207,7 +207,7 @@ export default function SessionsPage() {
               icon={CheckCircle2} label="Success Rate"
               value={summary ? `${summary.success_rate}%` : '—'}
               sub={summary ? `${summary.succeeded} ok / ${summary.failed} fail` : undefined}
-              color={summary?.success_rate >= 80 ? 'var(--green)' : 'var(--red)'}
+              color={!summary ? 'var(--muted)' : summary.success_rate >= 80 ? 'var(--green)' : 'var(--red)'}
             />
             <StatCard icon={DollarSign} label="Total Cost" value={fmtCost(summary?.total_cost_usd)} />
             <StatCard icon={DollarSign} label="Avg Cost / Session" value={fmtCost(summary?.avg_cost_usd)} color="var(--muted)" />
