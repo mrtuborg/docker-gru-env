@@ -59,6 +59,7 @@ interface PipelineData {
   allowed_repos: string[]
   findings: FindingsBoard | null
   orchestrator_agent_id: string
+  analytics_connector_id: string
 }
 
 interface PipelineSummary {
@@ -911,6 +912,7 @@ export default function PipelineEditor() {
         stages: [], poll_interval: 300, max_issues: 50, max_retries: 3,
         session_timeout_hours: 4, models: [], allowed_repos: [], findings: null,
         orchestrator_agent_id: '',
+        analytics_connector_id: '',
       })
     } else {
       fetch(`/api/pipelines/${id}`).then(r => r.json()).then(data => {
@@ -1131,6 +1133,7 @@ export default function PipelineEditor() {
     : null
 
   const githubConnectors = connectors.filter(p => p.plugin_type === 'github')
+  const analyticsConnectors = connectors.filter(p => p.plugin_type === 'analytics')
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 56px - 48px)' }}>
@@ -1374,6 +1377,20 @@ export default function PipelineEditor() {
                 onChange={e => update({ session_timeout_hours: parseFloat(e.target.value) || 4 })}/>
             </div>
           </div>
+
+          {/* Analytics connector */}
+          <div className="section-label" style={{ marginTop:16 }}>Analytics DB Connector</div>
+          <select className="form-input" style={{ width:'100%', marginBottom:8 }}
+            value={pipeline.analytics_connector_id || ''}
+            onChange={e => update({ analytics_connector_id: e.target.value })}>
+            <option value="">— None (no analytics) —</option>
+            {analyticsConnectors.map(a => (
+              <option key={a.id} value={a.id}>{a.display_name || a.id}</option>
+            ))}
+            {analyticsConnectors.length === 0 && (
+              <option disabled value="">No analytics connectors — add one in Connectors page</option>
+            )}
+          </select>
 
           {/* Orchestrator */}
           <div className="section-label" style={{ marginTop:16 }}>Orchestrator Agent</div>

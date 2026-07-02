@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { RefreshCw, DollarSign, Clock, Activity, CheckCircle2, XCircle } from 'lucide-react'
+import { RefreshCw, DollarSign, Clock, Activity, CheckCircle2, XCircle, Cpu, Zap } from 'lucide-react'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -13,6 +13,18 @@ function fmtCost(usd: number | null | undefined): string {
   if (usd == null) return '—'
   if (usd === 0) return '$0'
   return `$${usd.toFixed(4)}`
+}
+
+function fmtTokens(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
+  return String(n)
+}
+
+function fmtNanoAiu(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  return `${(n / 1_000_000).toFixed(0)} µAIU`
 }
 
 function fmtTime(iso: string | null | undefined): string {
@@ -200,6 +212,20 @@ export default function SessionsPage() {
             <StatCard icon={DollarSign} label="Total Cost" value={fmtCost(summary?.total_cost_usd)} />
             <StatCard icon={DollarSign} label="Avg Cost / Session" value={fmtCost(summary?.avg_cost_usd)} color="var(--muted)" />
             <StatCard icon={Clock} label="Avg Duration" value={fmtDur(summary?.avg_duration_s)} color="var(--muted)" />
+            {summary?.total_tokens_output > 0 && (
+              <StatCard icon={Cpu} label="Output Tokens" value={fmtTokens(summary?.total_tokens_output)}
+                sub={summary?.total_tokens_input ? `↓${fmtTokens(summary.total_tokens_input)} in` : undefined}
+                color="#6366f1" />
+            )}
+            {summary?.total_cache_read > 0 && (
+              <StatCard icon={Zap} label="Cache Hits" value={fmtTokens(summary?.total_cache_read)}
+                sub="tokens served from cache" color="var(--green)" />
+            )}
+            {summary?.total_nano_aiu > 0 && (
+              <StatCard icon={DollarSign} label="Total AIU" value={fmtNanoAiu(summary?.total_nano_aiu)}
+                sub={summary?.total_premium_requests ? `${summary.total_premium_requests} premium req` : undefined}
+                color="var(--muted)" />
+            )}
           </div>
 
           {/* Breakdown */}
@@ -230,7 +256,7 @@ export default function SessionsPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                    {['Issue', 'Title', 'Stage', 'Status', 'Started', 'Duration', 'Model', 'Cost'].map(h => (
+                    {['Issue', 'Title', 'Stage', 'Status', 'Started', 'Duration', 'Model', 'Cost', 'Tokens ↑', 'Cache ⚡', 'AIU'].map(h => (
                       <th key={h} style={{
                         padding: '9px 12px', textAlign: 'left', color: 'var(--muted)',
                         fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em',
@@ -271,6 +297,18 @@ export default function SessionsPage() {
                       <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap',
                         color: s.cost_usd ? 'var(--fg)' : 'var(--muted)' }}>
                         {fmtCost(s.cost_usd)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--muted)', fontSize: 11 }}
+                        title={`Input: ${s.tokens_input ?? '—'}, Output: ${s.tokens_output ?? '—'}`}>
+                        {fmtTokens(s.tokens_output)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--green)', fontSize: 11 }}
+                        title="Cache-read tokens (billed at lower rate)">
+                        {fmtTokens(s.tokens_cache_read)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--muted)', fontSize: 11 }}
+                        title="GitHub Copilot nano AI Units">
+                        {fmtNanoAiu(s.nano_aiu)}
                       </td>
                     </tr>
                   ))}

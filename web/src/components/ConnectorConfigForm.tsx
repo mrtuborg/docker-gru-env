@@ -80,6 +80,15 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
     { key: 'cw_ssh_path',        label: 'SSH Keys Path',       type: 'text', placeholder: '~/.ssh',           defaultValue: '~/.ssh',
       hint: 'Host path mounted read-only as /root/.ssh inside the container.' },
   ],
+  analytics: [
+    { key: 'host',     label: 'PostgreSQL Host',     type: 'text',   placeholder: 'gru-analytics-db', defaultValue: 'gru-analytics-db', required: true, wizard: true,
+      hint: 'Hostname of the PostgreSQL server. Use Docker service name for containers on the same network.' },
+    { key: 'port',     label: 'Port',                type: 'number', placeholder: '5432',             defaultValue: 5432,               wizard: true },
+    { key: 'database', label: 'Database',            type: 'text',   placeholder: 'gru_analytics',   defaultValue: 'gru_analytics',    required: true, wizard: true },
+    { key: 'user',     label: 'User',                type: 'text',   placeholder: 'gru',              defaultValue: 'gru',              required: true, wizard: true },
+    { key: 'password', label: 'Password',            type: 'password', placeholder: '••••',           required: true, wizard: true,
+      hint: 'Stored encrypted in the vault. Leave blank to keep the existing password.' },
+  ],
 }
 
 function TagList({ value, onChange, placeholder }: { value: string[]; onChange: (v: string[]) => void; placeholder?: string }) {

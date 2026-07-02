@@ -83,7 +83,7 @@ export default function Dashboard() {
                 title="Go to Connectors"
               >
                 <div style={{ fontSize:22, marginBottom:6 }}>
-                  {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : p.plugin_type === 'obsidian' ? '🔮' : '📝'}
+                  {p.plugin_type === 'github' ? '🐙' : p.plugin_type === 'copilot' ? '🤖' : p.plugin_type === 'azure' ? '☁️' : p.plugin_type === 'obsidian' ? '🔮' : p.plugin_type === 'analytics' ? '🗄️' : '📝'}
                 </div>
                 <div style={{ fontWeight:600, fontSize:13, marginBottom:6 }}>{p.display_name}</div>
                 <HealthBadge status={p.health?.status} message={p.health?.message}/>

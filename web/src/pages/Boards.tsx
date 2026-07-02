@@ -155,6 +155,7 @@ function IssueDrawer({
 }) {
   const [entries, setEntries] = useState<LogEntry[]>([])
   const [history, setHistory] = useState<any[]>([])
+  const [storedLogs, setStoredLogs] = useState<any[]>([])
   const agentScrollRef = useRef<HTMLDivElement>(null)
   const atBottomRef = useRef(true)
 
@@ -163,6 +164,7 @@ function IssueDrawer({
   // Clear log when switching to a different issue
   useEffect(() => {
     setEntries([])
+    setStoredLogs([])
     atBottomRef.current = true
   }, [issueNum])
 
@@ -174,6 +176,15 @@ function IssueDrawer({
       .then(r => r.json()).then(d => setHistory(Array.isArray(d) ? d : [])).catch(() => {})
     return () => ac.abort()
   }, [pipelineId, issueNum])
+
+  // Load stored logs for historical (non-active) issues
+  useEffect(() => {
+    if (isActive) return
+    const ac = new AbortController()
+    fetch(`/api/pipelines/${pipelineId}/issues/${issueNum}/session-logs`, { signal: ac.signal })
+      .then(r => r.json()).then(d => setStoredLogs(Array.isArray(d) ? d : [])).catch(() => {})
+    return () => ac.abort()
+  }, [pipelineId, issueNum, isActive])
 
   // SSE: connect only when issue is active; pipeline-wide stream, filtered client-side
   // issueNum intentionally NOT in deps — the stream is pipeline-wide
@@ -201,7 +212,7 @@ function IssueDrawer({
     if (!atBottomRef.current) return
     const el = agentScrollRef.current
     if (el) el.scrollTop = el.scrollHeight
-  }, [entries.length])
+  }, [entries.length, storedLogs.length])
 
   const issueTitle = issue.title ?? issue.issue_title ?? issue.name ?? ''
   const issueStage = issue.stage ?? ''
@@ -298,7 +309,9 @@ function IssueDrawer({
             }}>
               <span style={{ fontSize: 13 }}>🤖</span>
               <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.07em', color: '#6366f1' }}>Stage Agent</span>
-              <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>{agentEntries.length} lines</span>
+              <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>
+                {isActive ? `${agentEntries.length} lines` : storedLogs.length > 0 ? `${storedLogs.length} stored` : ''}
+              </span>
             </div>
             <div
               ref={agentScrollRef}
@@ -308,14 +321,25 @@ function IssueDrawer({
               }}
               style={{ flex: 1, overflowY: 'auto', padding: '4px 0', fontFamily: 'monospace', fontSize: 11.5, background: 'color-mix(in srgb, #000 20%, var(--bg))' }}
             >
-              {agentEntries.length === 0 ? (
+              {isActive ? (
+                agentEntries.length === 0 ? (
+                  <div style={{ padding: '10px 16px', color: 'var(--muted)', fontStyle: 'italic', fontFamily: 'sans-serif', fontSize: 12 }}>
+                    Waiting for agent output…
+                  </div>
+                ) : agentEntries.map((e, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, padding: '1px 14px', alignItems: 'flex-start', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.03)' }}>
+                    <span style={{ color: '#555', flexShrink: 0, marginTop: 1, lineHeight: 1.6 }}>›</span>
+                    <span style={{ color: '#c9d1d9', wordBreak: 'break-word', flex: 1, lineHeight: 1.6 }}>{e.message}</span>
+                  </div>
+                ))
+              ) : storedLogs.length === 0 ? (
                 <div style={{ padding: '10px 16px', color: 'var(--muted)', fontStyle: 'italic', fontFamily: 'sans-serif', fontSize: 12 }}>
-                  {isActive ? 'Waiting for agent output…' : 'Agent output is captured only for live sessions.'}
+                  No stored logs for this session.
                 </div>
-              ) : agentEntries.map((e, i) => (
+              ) : storedLogs.map((row, i) => (
                 <div key={i} style={{ display: 'flex', gap: 8, padding: '1px 14px', alignItems: 'flex-start', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.03)' }}>
                   <span style={{ color: '#555', flexShrink: 0, marginTop: 1, lineHeight: 1.6 }}>›</span>
-                  <span style={{ color: '#c9d1d9', wordBreak: 'break-word', flex: 1, lineHeight: 1.6 }}>{e.message}</span>
+                  <span style={{ color: '#c9d1d9', wordBreak: 'break-word', flex: 1, lineHeight: 1.6 }}>{row.message}</span>
                 </div>
               ))}
             </div>
@@ -330,16 +354,32 @@ function IssueDrawer({
               {history.map((r, i) => {
                 const ok = ['success', 'completed', 'done'].includes(r.status)
                 const fail = ['failure', 'failed', 'error'].includes(r.status)
+                const tokOut = r.tokens_output
+                const nanoAiu = r.nano_aiu
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
-                    <span style={{ color: ok ? 'var(--green)' : fail ? 'var(--red)' : 'var(--muted)', fontWeight: 700, minWidth: 14 }}>
-                      {ok ? '✓' : fail ? '✕' : '○'}
-                    </span>
-                    <span style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{r.stage}</span>
-                    <span style={{ color: 'var(--muted)', flexShrink: 0 }}>{fmtDurShort(r.duration_s)}</span>
-                    {r.cost_usd ? <span style={{ color: 'var(--muted)', fontSize: 11, fontFamily: 'monospace' }}>${r.cost_usd.toFixed(4)}</span> : null}
-                    {r.error_message && <span style={{ color: 'var(--red)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={r.error_message}>{r.error_message}</span>}
-                    <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtTime(r.started_at)}</span>
+                  <div key={i} style={{ padding: '6px 14px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ color: ok ? 'var(--green)' : fail ? 'var(--red)' : 'var(--muted)', fontWeight: 700, minWidth: 14 }}>
+                        {ok ? '✓' : fail ? '✕' : '○'}
+                      </span>
+                      <span style={{ background: 'color-mix(in srgb, var(--accent) 12%, transparent)', color: 'var(--accent)', borderRadius: 4, padding: '1px 6px', fontSize: 11, fontWeight: 600, flexShrink: 0 }}>{r.stage}</span>
+                      <span style={{ color: 'var(--muted)', flexShrink: 0 }}>{fmtDurShort(r.duration_s)}</span>
+                      {r.cost_usd != null && <span style={{ color: 'var(--muted)', fontSize: 11, fontFamily: 'monospace' }}>${r.cost_usd.toFixed(4)}</span>}
+                      {r.error_message && <span style={{ color: 'var(--red)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }} title={r.error_message}>{r.error_message}</span>}
+                      <span style={{ color: 'var(--muted)', fontSize: 11, marginLeft: 'auto', flexShrink: 0, whiteSpace: 'nowrap' }}>{fmtTime(r.started_at)}</span>
+                    </div>
+                    {(tokOut != null || nanoAiu != null) && (
+                      <div style={{ marginTop: 3, marginLeft: 22, display: 'flex', gap: 10, fontSize: 10, color: 'var(--muted)', fontFamily: 'monospace' }}>
+                        {r.tokens_input != null && <span title="Fresh input tokens">↓{r.tokens_input.toLocaleString()}</span>}
+                        {tokOut != null && <span title="Output tokens">↑{tokOut.toLocaleString()}</span>}
+                        {r.tokens_cache_read != null && <span title="Cache read tokens">⚡{r.tokens_cache_read.toLocaleString()}</span>}
+                        {nanoAiu != null && <span title="Nano AIU (GitHub cost units)">{(nanoAiu / 1_000_000).toFixed(0)} µAIU</span>}
+                        {r.premium_requests != null && <span title="Premium requests">{r.premium_requests} req</span>}
+                        {r.lines_added != null && (r.lines_added > 0 || r.lines_removed > 0) && (
+                          <span title="Code changes">+{r.lines_added}/-{r.lines_removed} lines</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}
