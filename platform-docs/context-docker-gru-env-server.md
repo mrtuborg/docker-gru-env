@@ -16,48 +16,50 @@ plus a pipeline engine that drives the HIL stress-test workflow against GitHub P
 
 No GHE project board. Work tracked via commits on `feature/gru-server`.
 
-Latest HEAD: `3182776` pushed to `origin/feature/gru-server`.
+Latest HEAD: `91868df` — `gru-migrate-analytics` JSON dump fallback for containers without asyncpg.
 
 ### Needs Human
 
 - **End-to-end Obsidian Sync test** — requires an active Obsidian Sync subscription.
-- **End-to-end Copilot connector test** — go through wizard, add GitHub → authorize OAuth → add Copilot → verify health.
-- **GitHub App must be re-registered on GHE if deleted** — Authorize button auto-detects deleted app (404 on device flow), clears stale client_id and shows manifest flow again. But user must manually click "Register GitHub App →" then complete device flow. Alternatively: use a classic PAT (recommended for GHE — GitHub App user tokens `ghu_*` return 401 on some GHE versions).
+- **GitHub App must be re-registered on GHE if deleted** — use classic PAT as alternative.
+- **Recreate `gru-analytics-db` with 127.0.0.1 bind** — existing container was created with 0.0.0.0 binding. Run `./gru-db stop && ./gru-db start --port 9399` to recreate with secure loopback binding.
 
 ### Device State
 
-- Container: `gru-server-dev` running on port 9400
-- Volume: `gru-data` (has seeded hil-stress pipeline + ghe-roommate connector with PAT auth)
-- Mount: `~/.azure:/root/.azure`
-- Image: built from HEAD of `feature/gru-server`
-- Connector `ghe-roommate`: **HEALTHY** (authenticated as @vlad via classic PAT)
-- Pipeline `hil-stress`: **stopped** (not yet started), 6 queued issues visible on Boards page
-- Run commands:
-  ```bash
-  cd /Users/vn/ws/platform-development/docker-gru-env-server
-  ./server-run.sh                        # start (existing volume)
-  ./server-run.sh --fresh                # wipe + restart
-  ./server-run.sh --seed hil-stress/config.yml   # seed pipeline config
-  ./server-build.sh                      # rebuild image
-  ```
+- `gru-server-dev`: **HEALTHY**, port 9400, up ~38 min
+- `gru-analytics-db`: **running**, port 9399 exposed (currently 0.0.0.0 — needs recreate with 127.0.0.1 fix)
+- `gru-watcher-roommate-sensei-o-hil-stress`: **running** (22 hrs)
+- `gru-watcher-roomboard-linux-dev-support-board`: **running** (6 days)
+- Analytics PostgreSQL: **populated** — 10 pipeline runs + 7 run items + 709 host sessions + 233 watcher sessions
+- Connector `ghe-roommate`: **HEALTHY** (classic PAT, sensio.ghe.com)
+- Connector `analytics-main`: **HEALTHY** (host=localhost → translates to host.docker.internal:9399)
+
+Management scripts (main checkout `/Users/vn/ws/platform-development/docker-gru-env-server`):
+```bash
+./gru-server status|start|stop|restart|logs|wipe|rebuild [--port PORT]
+./gru-db     status|start|stop|restart|logs|wipe|psql    [--port PORT]
+./gru-migrate-analytics [--from CONTAINER|host] [--scan-sessions] [--dry-run]
+```
 
 ### Next Action
 
-**Pipeline Editor page** — the next session should implement a new page at `/#/pipeline-editor`
-(or rename the existing `PipelineEditor.tsx` skeleton) that lets users:
-1. View the list of pipeline stages (currently stored in DB as `pipeline_stages` rows)
-2. Add / edit / reorder stages visually
-3. Set per-stage prompt (text area), actor (ai/human), column (GH Project column picker)
-4. Import / export pipeline config as YAML (same format as `hil-stress/config.yml`)
+**Analytics DB web UI** — build a lightweight web UI for the `gru-analytics-db` PostgreSQL container,
+similar to the cost analytics dashboard at:
+`https://vladimir-nosenko-vladimir-nosenko-sensio-ghe-com.pages.sensio.ghe.com`
+(a GitHub Pages hosted HTML dashboard with session cost breakdowns by issue/model/week).
 
-Key files:
-- `web/src/pages/PipelineEditor.tsx` — skeleton exists, needs full implementation
-- `server/routers/pipelines.py` — CRUD endpoints for stages already exist
-- `server/db/config.py` — `upsert_pipeline`, `get_pipeline`, `list_pipeline_stages`
-- `seed.py` — shows the YAML format used for import
+Next session steps:
+1. Fetch and analyse the reference dashboard page (requires GHE auth — user provides screenshots)
+2. Collect requirements: what tables/charts to show (session cost, token usage, model breakdown, etc.)
+3. Design the web UI — standalone HTML (no framework) served from the DB container, or from gru-server
+4. Implement and deploy
 
-The Boards page now shows queued/active/recent activity correctly.
-The Connectors page shows PAT input, OAuth modal handles stale app recovery.
+Key consideration: decide whether the web UI lives in:
+- `gru-analytics-db` container (PostgreSQL-only, needs a web server added), OR
+- `gru-server-dev` as an `/analytics` page in the existing React UI (easiest — already has the data)
+
+The analytics data is already in PostgreSQL (read via `analytics_connector.py`).
+The Sessions page in the React UI already shows token/cost data per session.
 
 ---
 

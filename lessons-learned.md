@@ -49,3 +49,17 @@
 - [2026-06-30] **GitHub Projects v2 board columns via GraphQL work perfectly with PAT on GHE** — `POST /api/graphql` with `organization.projectV2.field(name:"Status").options` returns all column names. The `organization` vs `user` entity type must be detected first via `GET /api/v3/orgs/{owner}`.
 
 - [2026-06-30] **Boards page should show pipeline activity, not a GH board clone** — The page should fetch `/api/pipelines/{id}/status` and display queued/active/recent items, not replicate the GitHub Projects board columns. The engine's `_query_board()` can be called even when the engine is stopped to populate the queue list for display.
+
+- [2026-07-02] **`gru-db start --port` auto-recreates container on port mismatch** — Docker port mappings are fixed at container creation time. `docker stop` does not remove the container. The fix: inspect `.HostConfig.PortBindings`, and if requested port differs, `docker rm -f` + recreate (keeping volume). This is much better than showing an error.
+
+- [2026-07-02] **`find_shutdown_for_window` must use `events.jsonl` mtime, not directory mtime** — Session directories have their mtime updated by later writes (checkpoints, workspace.yaml) hours or days after the session ends. Using directory mtime for the time window filter causes most sessions to fall outside the window. Always stat `events.jsonl` directly.
+
+- [2026-07-02] **`localhost`/`127.0.0.1` inside Docker container resolves to the container, not the host** — When users configure an analytics connector with host=localhost, they expect to reach their Mac. The fix is to translate loopback addresses to `host.docker.internal` in `_build_url()`. Apply the same translation to env var URLs too for consistency. Also add `--add-host host.docker.internal:host-gateway` to `docker run` for Linux hosts.
+
+- [2026-07-02] **Trust-auth PostgreSQL must bind to 127.0.0.1, not 0.0.0.0** — `POSTGRES_HOST_AUTH_METHOD=trust` combined with `-p PORT:5432` (which defaults to 0.0.0.0) means anyone on the same network can connect as the postgres superuser with no credentials. Always use `-p 127.0.0.1:PORT:5432` when exposing a trust-auth DB port.
+
+- [2026-07-02] **Some older Copilot sessions store tokenDetails as `{'tokenCount': N}` dicts** — The `tokenDetails` format changed between Copilot CLI versions. Older sessions have `{"input": {"tokenCount": 547}}` instead of `{"input": 547}`. Always unwrap dict values before casting to int.
+
+- [2026-07-02] **Host Copilot sessions (966 found) are not pipeline runs — scan separately** — `~/.copilot/session-state/` on the host contains standalone Copilot CLI sessions, not pipeline-managed ones. They have no SQLite `pipeline_run` records. Use `gru-migrate-analytics --from host --scan-sessions` to import them as standalone sessions under `host-sessions` run_id.
+
+- [2026-07-02] **Containers without asyncpg need JSON dump relay via gru-server-dev** — The watcher container (`gru-watcher-*`) doesn't have asyncpg installed. The migration script handles this by: (1) dumping sessions to JSON in the source container (no asyncpg needed), (2) copying JSON to gru-server-dev, (3) importing from there. The relay uses `gru-analytics-db:5432` (Docker network) rather than the exposed host port.
