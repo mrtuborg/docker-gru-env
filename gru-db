@@ -2,24 +2,36 @@
 # gru-db — manage the gru-analytics-db PostgreSQL container
 #
 # Usage:
-#   ./gru-db status               # running? port? uptime?
-#   ./gru-db start                # start (create if needed)
-#   ./gru-db start --port PORT    # expose on PORT (auto-recreates container if port changed)
-#   ./gru-db stop                 # graceful stop
-#   ./gru-db restart              # stop + start
-#   ./gru-db logs                 # tail container logs
-#   ./gru-db wipe                 # ⚠ remove container AND volume, then recreate
-#   ./gru-db psql                 # open psql shell inside container
+#   ./gru-db status                    # running? port? uptime?
+#   ./gru-db start                     # start (create if needed; builds the image if missing)
+#   ./gru-db start --port PORT         # expose postgres on PORT (auto-recreates if port changed)
+#   ./gru-db start --web-port PORT     # expose the built-in analytics web UI on PORT
+#   ./gru-db stop                      # graceful stop
+#   ./gru-db restart                   # stop + start
+#   ./gru-db logs                      # tail container logs
+#   ./gru-db wipe                      # ⚠ remove container AND volume, then recreate
+#   ./gru-db psql                      # open psql shell inside container
+#   ./gru-db build                     # rebuild the gru-analytics-db image from docker/analytics-db/
 #
 # Flags (only apply when creating a new container):
-#   --port PORT      expose postgres to host on PORT (default: not exposed)
+#   --port PORT       expose postgres to host on PORT (default: not exposed)
+#   --web-port PORT   expose the built-in analytics dashboard on PORT (default: not exposed)
+#
+# The container runs a custom image (built from docker/analytics-db/) that extends
+# postgres:16-alpine with a small built-in web dashboard (visualizes pipeline_runs /
+# pipeline_run_items). Its lifecycle is tied to this container — it starts/stops with
+# postgres, independent of gru-server. Both host ports are bound to 127.0.0.1 only.
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONTAINER="gru-analytics-db"
 VOLUME="gru-analytics-data"
 NETWORK="gru-network"
-HOST_PORT=""   # set by --port
+IMAGE="gru-analytics-db:local"
+DOCKERFILE_DIR="$SCRIPT_DIR/docker/analytics-db"
+HOST_PORT=""     # set by --port
+WEB_PORT=""      # set by --web-port
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
 CMD="${1:-status}"
@@ -28,9 +40,21 @@ while [[ $i -le $# ]]; do
   arg="${!i}"
   case "$arg" in
     --port) i=$((i+1)); HOST_PORT="${!i}" ;;
+    --web-port) i=$((i+1)); WEB_PORT="${!i}" ;;
   esac
   i=$((i+1))
 done
+
+do_build() {
+  echo "▶ Building $IMAGE from $DOCKERFILE_DIR …"
+  docker build -t "$IMAGE" "$DOCKERFILE_DIR"
+}
+
+ensure_image() {
+  if ! docker image inspect "$IMAGE" &>/dev/null; then
+    do_build
+  fi
+}
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 container_running() { docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q "true"; }
@@ -45,12 +69,18 @@ do_status() {
   local state; state=$(docker inspect --format '{{.State.Status}}' "$CONTAINER")
   if container_running; then
     local since; since=$(docker inspect --format '{{.State.StartedAt}}' "$CONTAINER" | cut -c1-19 | tr 'T' ' ')
-    local exposed; exposed=$(docker inspect --format '{{range $p,$v := .NetworkSettings.Ports}}{{if $v}}{{(index $v 0).HostPort}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null)
+    local db_port; db_port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "5432/tcp") 0).HostPort}}' "$CONTAINER" 2>/dev/null || true)
+    local web_port; web_port=$(docker inspect --format '{{(index (index .NetworkSettings.Ports "8080/tcp") 0).HostPort}}' "$CONTAINER" 2>/dev/null || true)
     echo "$CONTAINER  ✓ running  (since ${since} UTC)"
-    if [[ -n "$exposed" ]]; then
-      echo "  Host port: $exposed  →  psql -h localhost -p $exposed -U gru gru_analytics"
+    if [[ -n "$db_port" && "$db_port" != "<no value>" ]]; then
+      echo "  DB port:  $db_port  →  psql -h localhost -p $db_port -U gru gru_analytics"
     else
-      echo "  Not exposed to host  (use --port PORT when creating)"
+      echo "  DB not exposed to host  (use --port PORT when creating)"
+    fi
+    if [[ -n "$web_port" && "$web_port" != "<no value>" ]]; then
+      echo "  Web UI:   http://localhost:$web_port/"
+    else
+      echo "  Web UI not exposed to host  (use --web-port PORT when creating)"
     fi
   else
     echo "$CONTAINER  ○ $state"
@@ -58,6 +88,7 @@ do_status() {
 }
 
 do_start() {
+  ensure_image
   docker network create "$NETWORK" 2>/dev/null || true
 
   if container_running; then
@@ -65,18 +96,14 @@ do_start() {
   fi
 
   if container_exists; then
-    if [[ -n "$HOST_PORT" ]]; then
-      local mapped; mapped=$(docker inspect --format '{{range $p,$v := .HostConfig.PortBindings}}{{range $v}}{{.HostPort}} {{end}}{{end}}' "$CONTAINER" 2>/dev/null)
-      if ! echo "$mapped" | grep -qw "$HOST_PORT"; then
-        echo "▶ Recreating $CONTAINER with port $HOST_PORT (data volume preserved) …"
-        docker rm -f "$CONTAINER" 2>/dev/null || true
-        # fall through to create below
-      else
-        echo "▶ Starting $CONTAINER …"
-        docker start "$CONTAINER"
-        docker network connect "$NETWORK" "$CONTAINER" 2>/dev/null || true
-        echo -n "  Waiting for postgres"; _wait_ready; return
-      fi
+    local mapped; mapped=$(docker inspect --format '{{range $p,$v := .HostConfig.PortBindings}}{{range $v}}{{.HostPort}} {{end}}{{end}}' "$CONTAINER" 2>/dev/null)
+    local needs_recreate=0
+    if [[ -n "$HOST_PORT" ]] && ! echo "$mapped" | grep -qw "$HOST_PORT"; then needs_recreate=1; fi
+    if [[ -n "$WEB_PORT" ]] && ! echo "$mapped" | grep -qw "$WEB_PORT"; then needs_recreate=1; fi
+    if [[ $needs_recreate -eq 1 ]]; then
+      echo "▶ Recreating $CONTAINER with new port mapping (data volume preserved) …"
+      docker rm -f "$CONTAINER" 2>/dev/null || true
+      # fall through to create below
     else
       echo "▶ Starting $CONTAINER …"
       docker start "$CONTAINER"
@@ -87,11 +114,14 @@ do_start() {
 
   local port_args=()
   if [[ -n "$HOST_PORT" ]]; then
-    port_args=(-p "${HOST_PORT}:5432")
-    echo "▶ Creating $CONTAINER (postgres exposed on host:$HOST_PORT) …"
-  else
-    echo "▶ Creating $CONTAINER (not exposed to host) …"
+    port_args+=(-p "127.0.0.1:${HOST_PORT}:5432")
   fi
+  if [[ -n "$WEB_PORT" ]]; then
+    port_args+=(-p "127.0.0.1:${WEB_PORT}:8080")
+  fi
+  echo "▶ Creating $CONTAINER …"
+  echo "  postgres: $( [[ -n "$HOST_PORT" ]] && echo "127.0.0.1:$HOST_PORT" || echo "not exposed" )"
+  echo "  web UI:   $( [[ -n "$WEB_PORT" ]] && echo "http://127.0.0.1:$WEB_PORT/" || echo "not exposed" )"
   docker run -d \
     --name "$CONTAINER" \
     --network "$NETWORK" \
@@ -100,7 +130,7 @@ do_start() {
     -e POSTGRES_USER=gru \
     -e POSTGRES_HOST_AUTH_METHOD=trust \
     -e POSTGRES_DB=gru_analytics \
-    postgres:16-alpine
+    "$IMAGE"
 
   echo -n "  Waiting for postgres"; _wait_ready
 }
@@ -139,10 +169,13 @@ case "$CMD" in
   restart) do_stop; do_start ;;
   logs)    docker logs -f "$CONTAINER" ;;
   wipe)    do_wipe ;;
+  build)   do_build ;;
   psql)    docker exec -it "$CONTAINER" psql -U gru gru_analytics ;;
   *)
-    echo "Usage: $0 {status|start|stop|restart|logs|wipe|psql} [--port PORT]" >&2
-    echo "  start --port PORT  — expose postgres on PORT (auto-recreates if port changed)" >&2
-    echo "  wipe               — ⚠ remove container AND volume, recreate from scratch" >&2
+    echo "Usage: $0 {status|start|stop|restart|logs|wipe|build|psql} [--port PORT] [--web-port PORT]" >&2
+    echo "  start --port PORT      — expose postgres on PORT (auto-recreates if port changed)" >&2
+    echo "  start --web-port PORT  — expose the built-in analytics dashboard on PORT" >&2
+    echo "  wipe                   — ⚠ remove container AND volume, recreate from scratch" >&2
+    echo "  build                  — rebuild the gru-analytics-db image from docker/analytics-db/" >&2
     exit 1 ;;
 esac

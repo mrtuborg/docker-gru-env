@@ -2,13 +2,19 @@ version: "3.9"
 
 services:
   gru-analytics-db:
-    image: postgres:16-alpine
+    build:
+      context: ./docker/analytics-db
+    image: gru-analytics-db:local
     container_name: gru-analytics-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: gru
       POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_DB: gru_analytics
+    ports:
+      # Built-in analytics dashboard (see docker/analytics-db/). Loopback-only,
+      # consistent with the DB port's security convention.
+      - "127.0.0.1:${GRU_ANALYTICS_WEB_PORT:-9398}:8080"
     volumes:
       - gru-analytics-data:/var/lib/postgresql/data
     networks:
