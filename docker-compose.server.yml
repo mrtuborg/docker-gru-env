@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: gru
-      POSTGRES_PASSWORD: gru
+      POSTGRES_HOST_AUTH_METHOD: trust
       POSTGRES_DB: gru_analytics
     volumes:
       - gru-analytics-data:/var/lib/postgresql/data

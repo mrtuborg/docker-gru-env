@@ -25,7 +25,7 @@ HOST_PORT=""   # set by --port
 
 DB_CONTAINER="gru-analytics-db"
 DB_NETWORK="gru-network"
-DB_URL="postgresql://gru:gru@${DB_CONTAINER}:5432/gru_analytics"
+DB_URL="postgresql://gru@${DB_CONTAINER}:5432/gru_analytics"
 
 AZURE_DIR="$HOME/.azure"
 WORKSPACE_HOST="/Users/vn/ws/roommate-sensei-o"

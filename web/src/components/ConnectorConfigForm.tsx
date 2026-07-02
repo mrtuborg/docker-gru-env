@@ -82,12 +82,11 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
   ],
   analytics: [
     { key: 'host',     label: 'PostgreSQL Host / IP', type: 'text',   placeholder: '192.168.1.100 or hostname', required: true, wizard: true,
-      hint: 'Hostname of the PostgreSQL server. Use Docker service name for containers on the same network.' },
-    { key: 'port',     label: 'Port',                type: 'number', placeholder: '5432',             defaultValue: 5432,               wizard: true },
-    { key: 'database', label: 'Database',            type: 'text',   placeholder: 'gru_analytics',   defaultValue: 'gru_analytics',    required: true, wizard: true },
-    { key: 'user',     label: 'User',                type: 'text',   placeholder: 'gru',              defaultValue: 'gru',              required: true, wizard: true },
-    { key: 'password', label: 'Password',            type: 'password', placeholder: '••••',           required: true, wizard: true,
-      hint: 'Stored encrypted in the vault. Leave blank to keep the existing password.' },
+      hint: 'Hostname or IP of the PostgreSQL server. Use Docker container name for containers on the same network.' },
+    { key: 'port',     label: 'Port',                type: 'number', placeholder: '5432',           defaultValue: 5432,            wizard: true },
+    { key: 'database', label: 'Database',            type: 'text',   placeholder: 'gru_analytics',  defaultValue: 'gru_analytics', wizard: true },
+    { key: 'user',     label: 'User',                type: 'text',   placeholder: 'gru',             defaultValue: 'gru',           wizard: true,
+      hint: 'PostgreSQL user. No password required — server uses trust authentication.' },
   ],
 }
 

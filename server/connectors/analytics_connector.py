@@ -21,7 +21,6 @@ import os
 from typing import Protocol, runtime_checkable
 
 from ..connector_base import GruConnector, ConnectorHealth, HealthStatus
-from ..vault import load_secret, store_secret
 
 logger = logging.getLogger(__name__)
 
@@ -276,14 +275,13 @@ class AnalyticsConnector(GruConnector):
     def config_schema(cls) -> dict:
         return {
             "type": "object",
-            "required": ["host", "database", "user"],
+            "required": ["host"],
             "properties": {
-                "host":     {"type": "string", "title": "Host / IP",  "placeholder": "192.168.1.100 or hostname"},
-                "port":     {"type": "integer","title": "Port",       "default": 5432},
-                "database": {"type": "string", "title": "Database", "default": "gru_analytics"},
-                "user":     {"type": "string", "title": "User",     "default": "gru"},
-                "password": {"type": "string", "title": "Password", "format": "password",
-                             "description": "Stored in vault. Leave blank to keep existing value."},
+                "host":     {"type": "string",  "title": "Host / IP", "placeholder": "192.168.1.100 or hostname"},
+                "port":     {"type": "integer", "title": "Port",      "default": 5432},
+                "database": {"type": "string",  "title": "Database",  "default": "gru_analytics"},
+                "user":     {"type": "string",  "title": "User",      "default": "gru",
+                             "description": "Must exist in Postgres. No password required (trust auth)."},
             },
         }
 
@@ -291,11 +289,6 @@ class AnalyticsConnector(GruConnector):
 
     async def configure(self, config: dict) -> None:
         self._config = config
-        # Store password in vault if provided in config
-        if config.get("password"):
-            await store_secret(self.plugin_id, "password", config["password"])
-            config.pop("password", None)  # never keep password in plain config
-
         # Close existing pool so _connect() rebuilds with new connection params
         await self.teardown()
         await self._connect()
@@ -305,7 +298,7 @@ class AnalyticsConnector(GruConnector):
         if self._pool is not None:
             return
 
-        url = await self._build_url()
+        url = self._build_url()
         if not url:
             logger.warning("Analytics connector %s: no URL — skipping connect", self.plugin_id)
             return
@@ -320,13 +313,13 @@ class AnalyticsConnector(GruConnector):
             )
             async with self._pool.acquire() as conn:  # type: ignore[union-attr]
                 await conn.execute(_DDL)
-            logger.info("Analytics connector %s connected to %s", self.plugin_id, url.split("@")[-1])
+            logger.info("Analytics connector %s connected to %s", self.plugin_id, url)
         except Exception as exc:
             logger.warning("Analytics connector %s: connect failed: %s", self.plugin_id, exc)
             self._pool = None
 
-    async def _build_url(self) -> str:
-        """Assemble the Postgres DSN from config + vault password (or env fallback)."""
+    def _build_url(self) -> str:
+        """Assemble the Postgres DSN from config (no password — trust auth)."""
         env_url = os.environ.get("ANALYTICS_DB_URL", "")
         if env_url and not self._config.get("host"):
             return env_url                   # env var wins when no explicit config
@@ -337,9 +330,8 @@ class AnalyticsConnector(GruConnector):
         port = int(self._config.get("port", 5432))
         db   = self._config.get("database", "gru_analytics")
         user = self._config.get("user", "gru")
-        pw   = await load_secret(self.plugin_id, "password") or "gru"
 
-        return f"postgresql://{user}:{pw}@{host}:{port}/{db}"
+        return f"postgresql://{user}@{host}:{port}/{db}"
 
     async def health(self) -> ConnectorHealth:
         if self._pool is None:
