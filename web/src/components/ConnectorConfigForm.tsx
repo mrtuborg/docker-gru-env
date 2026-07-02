@@ -81,7 +81,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
       hint: 'Host path mounted read-only as /root/.ssh inside the container.' },
   ],
   analytics: [
-    { key: 'host',     label: 'PostgreSQL Host',     type: 'text',   placeholder: 'gru-analytics-db', defaultValue: 'gru-analytics-db', required: true, wizard: true,
+    { key: 'host',     label: 'PostgreSQL Host / IP', type: 'text',   placeholder: '192.168.1.100 or hostname', required: true, wizard: true,
       hint: 'Hostname of the PostgreSQL server. Use Docker service name for containers on the same network.' },
     { key: 'port',     label: 'Port',                type: 'number', placeholder: '5432',             defaultValue: 5432,               wizard: true },
     { key: 'database', label: 'Database',            type: 'text',   placeholder: 'gru_analytics',   defaultValue: 'gru_analytics',    required: true, wizard: true },

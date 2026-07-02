@@ -278,8 +278,8 @@ class AnalyticsConnector(GruConnector):
             "type": "object",
             "required": ["host", "database", "user"],
             "properties": {
-                "host":     {"type": "string", "title": "Host",     "default": "gru-analytics-db"},
-                "port":     {"type": "integer","title": "Port",     "default": 5432},
+                "host":     {"type": "string", "title": "Host / IP",  "placeholder": "192.168.1.100 or hostname"},
+                "port":     {"type": "integer","title": "Port",       "default": 5432},
                 "database": {"type": "string", "title": "Database", "default": "gru_analytics"},
                 "user":     {"type": "string", "title": "User",     "default": "gru"},
                 "password": {"type": "string", "title": "Password", "format": "password",
@@ -331,7 +331,9 @@ class AnalyticsConnector(GruConnector):
         if env_url and not self._config.get("host"):
             return env_url                   # env var wins when no explicit config
 
-        host = self._config.get("host", "gru-analytics-db")
+        host = self._config.get("host", "")
+        if not host:
+            return ""                        # misconfigured — caller will skip connect
         port = int(self._config.get("port", 5432))
         db   = self._config.get("database", "gru_analytics")
         user = self._config.get("user", "gru")
