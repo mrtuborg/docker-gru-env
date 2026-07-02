@@ -513,16 +513,6 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
                     fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
                   <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
                     fontSize="9" fontWeight="700" fill={color}>{label}</text>
-                  {/* Failure label name below the ✗ pill */}
-                  {a.failureLabel && (
-                    <>
-                      <rect x={lx - (a.failureLabel.length * 3.2 + 6) / 2} y={ly + 8}
-                        width={a.failureLabel.length * 3.2 + 6} height={12} rx={3}
-                        fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
-                      <text x={lx} y={ly + 14} textAnchor="middle" dominantBaseline="middle"
-                        fontSize="8" fontWeight="600" fill={color}>{a.failureLabel}</text>
-                    </>
-                  )}
                 </g>
               )
             })}
