@@ -116,6 +116,7 @@ do_start() {
   docker run -d \
     --name "$CONTAINER" \
     --network "$DB_NETWORK" \
+    --add-host host.docker.internal:host-gateway \
     -p "${port}:9400" \
     -v "${VOLUME}:/data" \
     -e "ANALYTICS_DB_URL=${DB_URL}" \
