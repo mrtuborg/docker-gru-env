@@ -29,6 +29,7 @@ DB_URL="postgresql://gru:gru@${DB_CONTAINER}:5432/gru_analytics"
 
 AZURE_DIR="$HOME/.azure"
 WORKSPACE_HOST="/Users/vn/ws/roommate-sensei-o"
+SKILLS_HOST="$REPO_ROOT/skills"   # repo skills dir — mapped into container as /app/skills
 
 # ── arg parsing ───────────────────────────────────────────────────────────────
 CMD="${1:-status}"
@@ -94,8 +95,9 @@ do_start() {
 
   echo "▶ Creating $CONTAINER on port $port …"
 
-  local azure_args=(); [[ -d "$AZURE_DIR"       ]] && azure_args+=(-v "$AZURE_DIR:/root/.azure")
-  local ws_args=();    [[ -d "$WORKSPACE_HOST"  ]] && ws_args+=(-v "$WORKSPACE_HOST:/workspace:ro")
+  local azure_args=();  [[ -d "$AZURE_DIR"      ]] && azure_args+=(-v "$AZURE_DIR:/root/.azure")
+  local ws_args=();     [[ -d "$WORKSPACE_HOST" ]] && ws_args+=(-v "$WORKSPACE_HOST:/workspace:ro")
+  local skills_args=(); [[ -d "$SKILLS_HOST"    ]] && skills_args+=(-v "$SKILLS_HOST:/app/skills:ro")
 
   docker run -d \
     --name "$CONTAINER" \
@@ -105,6 +107,7 @@ do_start() {
     -e "ANALYTICS_DB_URL=${DB_URL}" \
     "${azure_args[@]+"${azure_args[@]}"}" \
     "${ws_args[@]+"${ws_args[@]}"}" \
+    "${skills_args[@]+"${skills_args[@]}"}" \
     "$IMAGE"
 
   echo "✓ http://localhost:$port"
