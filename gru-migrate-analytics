@@ -230,14 +230,19 @@ def parse_shutdown(events_file):
     return None, {}
 
 def extract_tokens(sd):
-    """Normalise tokenDetails from both host (snake_case) and container (camelCase)."""
+    """Normalise tokenDetails from both host (snake_case) and container (camelCase).
+    Some older sessions store values as {'tokenCount': N} dicts instead of ints."""
+    def unwrap(v):
+        if isinstance(v, dict):
+            return v.get("tokenCount")
+        return v
     td = sd.get("tokenDetails", {})
     return {
-        "input":       td.get("input")       or td.get("inputTokens"),
-        "output":      td.get("output")      or td.get("outputTokens"),
-        "cache_read":  td.get("cache_read")  or td.get("cacheReadInputTokens"),
-        "cache_write": td.get("cache_write") or td.get("cacheCreationInputTokens"),
-        "reasoning":   td.get("reasoning")   or td.get("reasoningTokens"),
+        "input":       unwrap(td.get("input"))       or unwrap(td.get("inputTokens")),
+        "output":      unwrap(td.get("output"))      or unwrap(td.get("outputTokens")),
+        "cache_read":  unwrap(td.get("cache_read"))  or unwrap(td.get("cacheReadInputTokens")),
+        "cache_write": unwrap(td.get("cache_write")) or unwrap(td.get("cacheCreationInputTokens")),
+        "reasoning":   unwrap(td.get("reasoning"))   or unwrap(td.get("reasoningTokens")),
     }
 
 async def main():
