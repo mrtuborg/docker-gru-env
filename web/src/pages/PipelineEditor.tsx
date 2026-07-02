@@ -1,8 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Save, Plus, Trash2, Bot, User, ChevronDown, ChevronRight,
-  Upload, RefreshCw, GripVertical,
+  Upload, Download, RefreshCw, ArrowUp, ArrowDown, X,
+  FileUp, Clipboard, Eye, Pencil, Wrench, Play, Pause, AlertTriangle,
 } from 'lucide-react'
 
 interface Stage {
@@ -13,6 +14,7 @@ interface Stage {
   prompt: string
   on_success: string
   on_failure: string
+  on_failure_label: string
   on_timeout: string
   env: Record<string, string>
 }
@@ -23,6 +25,9 @@ interface AgentInfo {
   description: string
   model: string
   tools: string[]
+  skills: string[]
+  is_orchestrator: boolean
+  lint_errors: string[]
 }
 
 interface ModelConfig {
@@ -53,6 +58,13 @@ interface PipelineData {
   models: ModelConfig[]
   allowed_repos: string[]
   findings: FindingsBoard | null
+  orchestrator_agent_id: string
+  analytics_connector_id: string
+}
+
+interface PipelineSummary {
+  id: string
+  name: string
 }
 
 const TEMPLATE_VARS = [
@@ -75,10 +87,795 @@ function normalizeStage(s: any): Stage {
     prompt: s.prompt || '',
     on_success: s.on_success || '',
     on_failure: s.on_failure || '',
+    on_failure_label: s.on_failure_label || '',
     on_timeout: s.on_timeout || '',
     env: s.env || (s.env_json ? JSON.parse(s.env_json) : {}),
   }
 }
+
+/** Escape a YAML string value. indentSpaces = spaces before the key line. */
+function yamlStr(s: string, indentSpaces = 0): string {
+  if (s == null) return '""'
+  if (!s) return '""'
+  if (s.includes('\n')) {
+    const contentIndent = ' '.repeat(indentSpaces + 2)
+    return '|\n' + s.split('\n').map(l => contentIndent + l).join('\n')
+  }
+  if (/[:#{}[\],&*?|>!'"%@`]/.test(s) || s.trim() !== s) return JSON.stringify(s)
+  return s
+}
+
+/** Export a pipeline to YAML text */
+function exportYaml(p: PipelineData): string {
+  const lines: string[] = []
+  lines.push(`name: ${yamlStr(p.name)}`)
+  if (p.plugin_id) lines.push(`plugin_id: ${yamlStr(p.plugin_id)}`)
+  if (p.project_owner) lines.push(`project_owner: ${yamlStr(p.project_owner)}`)
+  if (p.project_number) lines.push(`project_number: ${p.project_number}`)
+  lines.push(`poll_interval: ${p.poll_interval}`)
+  lines.push(`max_issues: ${p.max_issues}`)
+  lines.push(`max_retries: ${p.max_retries}`)
+  lines.push(`session_timeout_hours: ${p.session_timeout_hours}`)
+  if (p.models.length > 0) {
+    lines.push('models:')
+    for (const m of p.models) {
+      lines.push(`  - model: ${yamlStr(m.model)}`)
+      lines.push(`    priority: ${m.priority}`)
+    }
+  }
+  if (p.allowed_repos.length > 0) {
+    lines.push('allowed_repos:')
+    for (const r of p.allowed_repos) lines.push(`  - ${yamlStr(r)}`)
+  }
+  if (p.stages.length > 0) {
+    lines.push('stages:')
+    for (const s of p.stages) {
+      lines.push(`  - column: ${yamlStr(s.column, 4)}`)
+      lines.push(`    actor: ${s.actor}`)
+      if (s.agent_id) lines.push(`    agent_id: ${yamlStr(s.agent_id, 4)}`)
+      if (s.task_prompt) lines.push(`    task_prompt: ${yamlStr(s.task_prompt, 4)}`)
+      if (s.prompt) lines.push(`    prompt: ${yamlStr(s.prompt, 4)}`)
+      if (s.on_success) lines.push(`    on_success: ${yamlStr(s.on_success, 4)}`)
+      if (s.on_failure) lines.push(`    on_failure: ${yamlStr(s.on_failure, 4)}`)
+      if (s.on_failure_label) lines.push(`    on_failure_label: ${yamlStr(s.on_failure_label, 4)}`)
+      if (s.on_timeout) lines.push(`    on_timeout: ${yamlStr(s.on_timeout, 4)}`)
+      if (Object.keys(s.env).length > 0) {
+        lines.push('    env:')
+        for (const [k, v] of Object.entries(s.env)) {
+          lines.push(`      ${k}: ${yamlStr(v, 6)}`)
+        }
+      }
+    }
+  }
+  if (p.findings) {
+    lines.push('findings_project:')
+    lines.push(`  project_owner: ${yamlStr(p.findings.project_owner)}`)
+    lines.push(`  project_number: ${p.findings.project_number}`)
+    lines.push(`  initial_status: ${yamlStr(p.findings.initial_status)}`)
+  }
+  return lines.join('\n') + '\n'
+}
+
+// ── Tool colour palette — deterministic hash, no mutable global state ─────────
+const PALETTE = [
+  '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444',
+  '#06b6d4', '#84cc16', '#f97316', '#ec4899', '#6366f1',
+]
+function toolColor(tool: string): string {
+  const hash = tool.split('').reduce((acc, c) => (acc * 31 + c.charCodeAt(0)) | 0, 0)
+  return PALETTE[Math.abs(hash) % PALETTE.length]
+}
+
+// ── Blueprint Graph (SVG-based dynamic routing diagram) ──────────────────────
+
+const CARD_W = 164
+const H_GAP = 52     // gap between cards for arrows
+
+const ARC_BASE = 30  // minimum arc height above/below cards (px)
+const ARC_STEP = 22  // extra height per stage skipped
+
+interface GraphEdge { from: number; to: number; type: 'success' | 'failure'; failureLabel?: string }
+interface ArrowPath {
+  x1: number; y1: number
+  cx1: number; cy1: number
+  cx2: number; cy2: number
+  x2: number; y2: number
+  type: 'success' | 'failure'
+  straight: boolean  // adjacent success → horizontal side-to-side line
+  failureLabel?: string
+}
+
+function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
+  pipeline: PipelineData
+  agentMap: Record<string, AgentInfo>
+  onEditStage: (i: number) => void
+  onEdit: () => void
+}) {
+  const cardRefs = useRef<(HTMLDivElement | null)[]>([])
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [arrows, setArrows] = useState<ArrowPath[]>([])
+  const [svgSize, setSvgSize] = useState({ w: 0, h: 0 })
+
+  const stages = pipeline.stages
+
+  // Build edge list from on_success / on_failure
+  const edges: GraphEdge[] = []
+  stages.forEach((s, i) => {
+    const colIdx = (col: string) => stages.findIndex(st => st.column === col)
+    if (s.on_success) {
+      const to = colIdx(s.on_success)
+      if (to !== -1) edges.push({ from: i, to, type: 'success' })
+    }
+    if (s.on_failure || s.on_failure_label) {
+      const to = s.on_failure ? colIdx(s.on_failure) : -1
+      // Draw arc if there's a target stage; if label-only, draw arc back to self as a stub
+      if (to !== -1) {
+        edges.push({ from: i, to, type: 'failure', failureLabel: s.on_failure_label || undefined })
+      } else if (s.on_failure_label) {
+        // Label-only: show a self-loop stub (from === to)
+        edges.push({ from: i, to: i, type: 'failure', failureLabel: s.on_failure_label })
+      }
+    }
+  })
+
+  // Pre-compute padding from edge structure (no circular dependency with layout)
+  // svgPaddingTop only needed for non-adjacent success arcs (adjacent go side-to-side)
+  const nonAdjSuccess = edges.filter(e => e.type === 'success' && Math.abs(e.to - e.from) > 1)
+  const maxNonAdjSuccessSkip = Math.max(0, ...nonAdjSuccess.map(e => Math.abs(e.to - e.from)))
+  const maxFailureSkip = Math.max(0, ...edges.filter(e => e.type === 'failure').map(e => Math.abs(e.to - e.from)))
+  const svgPaddingTop = nonAdjSuccess.length > 0 ? ARC_BASE + maxNonAdjSuccessSkip * ARC_STEP + 14 : 10
+  const svgPaddingBottom = edges.some(e => e.type === 'failure') ? ARC_BASE + maxFailureSkip * ARC_STEP + 14 : 10
+
+  const edgeKey = edges.map(e => `${e.from}-${e.to}-${e.type}`).join(',')
+
+  // Measure card positions and compute arrow paths.
+  // Adjacent success  → horizontal side-to-side line (right-center to left-center)
+  // Non-adjacent success → cubic bezier arc above (top-center anchors)
+  // All failure        → cubic bezier arc below (bottom-center anchors)
+  const measureArrows = useCallback(() => {
+    const container = containerRef.current
+    if (!container) return
+    const containerRect = container.getBoundingClientRect()
+
+    const rects = cardRefs.current.map(el => {
+      if (!el) return null
+      const r = el.getBoundingClientRect()
+      return { x: r.left - containerRect.left, y: r.top - containerRect.top, w: r.width, h: r.height }
+    })
+
+    const maxRight = Math.max(...rects.filter(Boolean).map(r => r!.x + r!.w), 0)
+    const maxBottom = Math.max(...rects.filter(Boolean).map(r => r!.y + r!.h), 0)
+
+    const computed = edges.map(e => {
+      const fr = rects[e.from]
+      const tr = rects[e.to]
+      if (!fr || !tr) return null
+
+      const skip = Math.abs(e.to - e.from)
+      const arcH = ARC_BASE + skip * ARC_STEP
+      const isAdjacent = skip === 1
+
+      let x1, y1, cx1, cy1, cx2, cy2, x2, y2
+      let straight = false
+
+      if (e.type === 'success' && isAdjacent) {
+        // Straight horizontal line: right-center → left-center through the gap
+        x1 = fr.x + fr.w;  y1 = fr.y + fr.h / 2
+        x2 = tr.x;         y2 = tr.y + tr.h / 2
+        cx1 = x1;  cy1 = y1  // degenerate bezier = straight line
+        cx2 = x2;  cy2 = y2
+        straight = true
+      } else if (e.type === 'success') {
+        // Arc above for skip connections (top-center anchors)
+        x1 = fr.x + fr.w / 2;  y1 = fr.y
+        x2 = tr.x + tr.w / 2;  y2 = tr.y
+        const peak = Math.min(y1, y2) - arcH
+        cx1 = x1;  cy1 = peak
+        cx2 = x2;  cy2 = peak
+      } else {
+        // Failure: arc below, bottom-center anchors
+        x1 = fr.x + fr.w / 2;  y1 = fr.y + fr.h
+        x2 = tr.x + tr.w / 2;  y2 = tr.y + tr.h
+        const trough = Math.max(y1, y2) + arcH
+        cx1 = x1;  cy1 = trough
+        cx2 = x2;  cy2 = trough
+      }
+
+      return { x1, y1, cx1, cy1, cx2, cy2, x2, y2, type: e.type, straight, failureLabel: e.failureLabel } as ArrowPath
+    }).filter(Boolean) as ArrowPath[]
+
+    // Height covers cards + failure arc space below
+    setSvgSize({ w: maxRight + 20, h: maxBottom + svgPaddingBottom + 20 })
+    setArrows(computed)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [edgeKey, svgPaddingTop, svgPaddingBottom])
+
+  // Re-measure whenever card heights change (agent data loads, etc.)
+  useLayoutEffect(() => {
+    measureArrows()
+    const container = containerRef.current
+    if (!container) return
+    const ro = new ResizeObserver(measureArrows)
+    ro.observe(container)
+    cardRefs.current.forEach(el => { if (el) ro.observe(el) })
+    return () => ro.disconnect()
+  }, [measureArrows])
+
+  if (stages.length === 0) {
+    return (
+      <div style={{ padding:'32px 24px', color:'var(--muted)', fontSize:13, textAlign:'center',
+        border:'1px dashed var(--border)', borderRadius:8 }}>
+        No stages. <button className="btn btn-ghost" style={{ fontSize:12 }} onClick={onEdit}>Switch to Edit</button> to add.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ overflowX:'auto', paddingBottom: svgPaddingBottom + 8 }}>
+      <div ref={containerRef} style={{ position:'relative', display:'inline-block', minWidth:'max-content' }}>
+        {/* Cards row — top/bottom padding reserves space for success/failure arcs */}
+        <div style={{ display:'flex', alignItems:'stretch', gap: H_GAP, paddingTop: svgPaddingTop, paddingBottom: svgPaddingBottom }}>
+          {stages.map((stage, i) => {
+            const ag = stage.agent_id ? agentMap[stage.agent_id] : null
+            const isHuman = stage.actor === 'human'
+            const tools = ag ? ag.tools : []
+            const hasLintErrors = ag && ag.lint_errors.length > 0
+
+            return (
+              <div
+                key={i}
+                ref={el => { cardRefs.current[i] = el }}
+                onClick={() => onEditStage(i)}
+                title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
+                style={{
+                  width: CARD_W, flexShrink:0,
+                  borderRadius:8,
+                  border: hasLintErrors
+                    ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
+                    : '1px solid var(--border)',
+                  background: hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 5%, var(--surface))'
+                    : isHuman
+                      ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
+                      : 'var(--surface)',
+                  cursor:'pointer', overflow:'hidden',
+                  display:'flex', flexDirection:'column',
+                  boxShadow:'0 1px 4px rgba(0,0,0,0.06)',
+                  transition:'border-color 0.15s, box-shadow 0.15s',
+                  opacity: hasLintErrors ? 0.85 : 1,
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLDivElement
+                  el.style.borderColor = hasLintErrors ? 'var(--yellow)' : 'var(--accent)'
+                  el.style.boxShadow = `0 0 0 3px color-mix(in srgb, ${hasLintErrors ? 'var(--yellow)' : 'var(--accent)'} 15%, transparent)`
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLDivElement
+                  el.style.borderColor = hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 60%, transparent)'
+                    : 'var(--border)'
+                  el.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'
+                }}
+              >
+                {/* Header */}
+                <div style={{
+                  padding:'7px 10px', display:'flex', alignItems:'center', gap:6,
+                  borderBottom:'1px solid var(--border)', flexShrink:0,
+                  background: hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 10%, transparent)'
+                    : isHuman
+                      ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
+                      : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                }}>
+                  <div style={{
+                    width:20, height:20, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
+                    background: hasLintErrors
+                      ? 'color-mix(in srgb, var(--yellow) 25%, transparent)'
+                      : isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                    color: hasLintErrors ? 'var(--yellow)' : isHuman ? 'var(--muted)' : 'var(--accent)',
+                    flexShrink:0,
+                  }}>
+                    {hasLintErrors ? <AlertTriangle size={11}/> : isHuman ? <User size={11}/> : <Bot size={11}/>}
+                  </div>
+                  <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {stage.column || '(unnamed)'}
+                  </span>
+                  <span style={{
+                    fontSize:9, fontWeight:700, minWidth:16, height:16,
+                    borderRadius:8, background:'var(--surface2)', color:'var(--muted)',
+                    display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+                  }}>
+                    {i + 1}
+                  </span>
+                </div>
+
+                {/* Agent — fixed height section */}
+                <div style={{ padding:'8px 10px 7px', borderBottom:'1px solid var(--border)', minHeight:50, display:'flex', flexDirection:'column', justifyContent:'center' }}>
+                  {hasLintErrors ? (
+                    <>
+                      <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
+                        {ag!.name || ag!.id}
+                      </div>
+                      <span style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>⚠ {ag!.lint_errors.length} dep error{ag!.lint_errors.length === 1 ? '' : 's'}</span>
+                    </>
+                  ) : isHuman ? (
+                    <div style={{ color:'var(--muted)', fontSize:11 }}>Human gate</div>
+                  ) : ag ? (
+                    <>
+                      <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:4 }}>
+                        {ag.name || ag.id}
+                      </div>
+                      {ag.model && (
+                        <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600, alignSelf:'flex-start' }}>
+                          {ag.model}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ fontSize:10, color:'var(--red)' }}>No agent assigned</div>
+                  )}
+                </div>
+
+                {/* Tools — fixed height section */}
+                <div style={{ padding:'7px 10px', borderBottom:'1px solid var(--border)', minHeight:38, display:'flex', alignItems:'center' }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                    {tools.length > 0 ? tools.map(t => (
+                      <span key={t} style={{
+                        fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
+                        background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
+                        color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
+                      }}>{t}</span>
+                    )) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
+                  </div>
+                </div>
+
+                {/* Skills — grows to fill remaining height so all cards equalise */}
+                <div style={{ padding:'7px 10px', flex:'1 0 auto', display:'flex', alignItems:'flex-start', alignContent:'flex-start' }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                    {ag && ag.skills.length > 0 ? ag.skills.map((sk: string) => {
+                      const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                      return (
+                        <span key={sk} title={sk} style={{
+                          fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
+                          background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                          color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                        }}>{label}</span>
+                      )
+                    }) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
+                  </div>
+                </div>
+
+                {/* Failure label — only shown when configured */}
+                {stage.on_failure_label && (
+                  <div style={{
+                    padding:'5px 10px', borderTop:'1px solid var(--border)',
+                    background:'color-mix(in srgb, var(--red) 5%, transparent)', flexShrink:0,
+                  }}>
+                    <span style={{ fontSize:9, color:'var(--muted)', marginRight:4 }}>✗ label:</span>
+                    <span style={{
+                      fontSize:9, padding:'1px 5px', borderRadius:3, fontWeight:600,
+                      background:'color-mix(in srgb, var(--red) 15%, transparent)',
+                      color:'var(--red)', border:'1px solid color-mix(in srgb, var(--red) 28%, transparent)',
+                    }}>{stage.on_failure_label}</span>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* SVG arrow overlay — success arcs ABOVE cards, failure arcs BELOW */}
+        {arrows.length > 0 && (
+          <svg
+            style={{ position:'absolute', top:0, left:0, pointerEvents:'none', overflow:'visible' }}
+            width={svgSize.w} height={svgSize.h}
+          >
+            <defs>
+              <marker id="arrow-success" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0.5 L0,6.5 L7,3.5 z" fill="var(--green)" />
+              </marker>
+              <marker id="arrow-failure" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                <path d="M0,0.5 L0,6.5 L7,3.5 z" fill="var(--red)" />
+              </marker>
+            </defs>
+            {arrows.map((a, idx) => {
+              const isSuccess = a.type === 'success'
+              const color = isSuccess ? 'var(--green)' : 'var(--red)'
+              const markerId = isSuccess ? 'arrow-success' : 'arrow-failure'
+              const label = isSuccess ? '✓' : '✗'
+
+              if (a.straight) {
+                // Horizontal side-to-side success arrow through the gap
+                const mx = (a.x1 + a.x2) / 2
+                const my = a.y1  // same Y for both (equal-height cards)
+                return (
+                  <g key={idx}>
+                    <line x1={a.x1} y1={my} x2={a.x2 - 6} y2={my}
+                      stroke={color} strokeWidth="1.5" markerEnd={`url(#${markerId})`} />
+                    {/* Label pill floats slightly above the line */}
+                    <rect x={mx - 8} y={my - 18} width={16} height={13} rx={3}
+                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
+                    <text x={mx} y={my - 11} textAnchor="middle" dominantBaseline="middle"
+                      fontSize="9" fontWeight="700" fill={color}>{label}</text>
+                  </g>
+                )
+              }
+
+              // Cubic bezier arc (non-adjacent success above, or failure below)
+              const lx = (a.x1 + 3 * a.cx1 + 3 * a.cx2 + a.x2) / 8
+              const ly = (a.y1 + 3 * a.cy1 + 3 * a.cy2 + a.y2) / 8
+              const d = `M ${a.x1} ${a.y1} C ${a.cx1} ${a.cy1}, ${a.cx2} ${a.cy2}, ${a.x2} ${a.y2}`
+              return (
+                <g key={idx}>
+                  <path d={d} fill="none" stroke={color} strokeWidth="1.5"
+                    markerEnd={`url(#${markerId})`}
+                    strokeDasharray={isSuccess ? undefined : '5 3'}
+                  />
+                  <rect x={lx - 8} y={ly - 7} width={16} height={13} rx={3}
+                    fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.96" />
+                  <text x={lx} y={ly} textAnchor="middle" dominantBaseline="middle"
+                    fontSize="9" fontWeight="700" fill={color}>{label}</text>
+                </g>
+              )
+            })}
+          </svg>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Pipeline Blueprint view ───────────────────────────────────────────────────
+
+interface BlueprintProps {
+  pipeline: PipelineData
+  agents: AgentInfo[]
+  running: boolean
+  onEditStage: (idx: number) => void   // switches to edit mode at that stage
+  onEdit: () => void                   // switches to full edit mode
+}
+
+function PipelineBlueprint({ pipeline, agents, running, onEditStage, onEdit }: BlueprintProps) {
+  const agentMap = Object.fromEntries(agents.map(a => [a.id, a]))
+  const aiStages = pipeline.stages.filter(s => s.actor === 'ai')
+
+  // Collect all unique tools + skills across all stages
+  const allTools = Array.from(new Set(
+    pipeline.stages.flatMap(s => {
+      const ag = s.agent_id ? agentMap[s.agent_id] : null
+      return ag ? ag.tools : []
+    })
+  ))
+  const allSkills = Array.from(new Set(
+    pipeline.stages.flatMap(s => {
+      const ag = s.agent_id ? agentMap[s.agent_id] : null
+      return ag ? ag.skills : []
+    })
+  ))
+
+  // tool/skill → list of stage indices that have it
+  const toolStageMap: Record<string, number[]> = {}
+  const skillStageMap: Record<string, number[]> = {}
+  pipeline.stages.forEach((s, i) => {
+    const ag = s.agent_id ? agentMap[s.agent_id] : null
+    if (!ag) return
+    ag.tools.forEach(t => {
+      if (!toolStageMap[t]) toolStageMap[t] = []
+      toolStageMap[t].push(i)
+    })
+    ag.skills.forEach(sk => {
+      if (!skillStageMap[sk]) skillStageMap[sk] = []
+      skillStageMap[sk].push(i)
+    })
+  })
+
+  const sharedTools = allTools
+    .filter(t => toolStageMap[t]?.length > 1)
+    .sort((a, b) => (toolStageMap[b]?.length || 0) - (toolStageMap[a]?.length || 0))
+
+  const sharedSkills = allSkills
+    .filter(sk => skillStageMap[sk]?.length > 1)
+    .sort((a, b) => (skillStageMap[b]?.length || 0) - (skillStageMap[a]?.length || 0))
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:24 }}>
+
+      {/* ── Orchestrator ── */}
+      {(() => {
+        const orchAgents = agents.filter(a => a.is_orchestrator)
+        const assigned = pipeline.orchestrator_agent_id ? agentMap[pipeline.orchestrator_agent_id] : null
+        return (
+          <div>
+            <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase' }}>
+              Orchestrator
+            </div>
+            <div style={{
+              display:'flex', alignItems:'center', gap:12,
+              padding:'12px 16px', borderRadius:8, border:'1px solid var(--border)',
+              background: assigned ? 'color-mix(in srgb, var(--purple) 6%, var(--surface))' : 'var(--surface2)',
+              borderColor: assigned ? 'color-mix(in srgb, var(--purple) 35%, transparent)' : 'var(--border)',
+            }}>
+              <div style={{
+                width:32, height:32, borderRadius:8, display:'flex', alignItems:'center', justifyContent:'center',
+                background: assigned ? 'color-mix(in srgb, var(--purple) 18%, transparent)' : 'var(--surface)',
+                color: assigned ? 'var(--purple)' : 'var(--muted)', flexShrink:0,
+              }}>
+                <Bot size={16}/>
+              </div>
+              {assigned ? (
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:'var(--text)' }}>{assigned.name}</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>{assigned.model || 'no model set'}</div>
+                </div>
+              ) : (
+                <div style={{ flex:1 }}>
+                  <div style={{ fontSize:13, fontWeight:600, color:'var(--muted)' }}>No orchestrator assigned</div>
+                  <div style={{ fontSize:11, color:'var(--muted)', marginTop:2 }}>
+                    {orchAgents.length === 0
+                      ? 'Mark an agent as Orchestrator in the Agents page first'
+                      : `${orchAgents.length} orchestrator agent${orchAgents.length > 1 ? 's' : ''} available — assign via Edit mode`}
+                  </div>
+                </div>
+              )}
+              {assigned && (
+                <span style={{ fontSize:10, padding:'2px 8px', borderRadius:4, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:700 }}>
+                  ORCHESTRATOR
+                </span>
+              )}
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* ── Stage Flow ── */}
+      <div>
+        <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase' }}>
+          Stage Flow
+        </div>
+        <BlueprintGraph pipeline={pipeline} agentMap={agentMap} onEditStage={onEditStage} onEdit={onEdit} />
+      </div>
+
+      {/* ── Bottom: Shared Tools + Stats ── */}
+      <div style={{ display:'flex', gap:20 }}>
+
+        {/* Shared Tools */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>
+            <Wrench size={11}/> Shared Tools
+          </div>
+
+          {sharedTools.length > 0 ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {sharedTools.map(tool => {
+                const stageIdxs = toolStageMap[tool] || []
+                const pct = Math.round((stageIdxs.length / Math.max(aiStages.length, 1)) * 100)
+                return (
+                  <div key={tool}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                      <span style={{
+                        fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4,
+                        background:`color-mix(in srgb, ${toolColor(tool)} 18%, transparent)`,
+                        color: toolColor(tool), border:`1px solid color-mix(in srgb, ${toolColor(tool)} 30%, transparent)`,
+                        flexShrink:0,
+                      }}>{tool}</span>
+                      <span style={{ fontSize:11, color:'var(--muted)', marginLeft:'auto', flexShrink:0 }}>
+                        {stageIdxs.length}/{aiStages.length} stages
+                      </span>
+                    </div>
+                    {/* Bar */}
+                    <div style={{ height:6, borderRadius:3, background:'var(--surface2)', overflow:'hidden' }}>
+                      <div style={{
+                        height:'100%', width:`${pct}%`, borderRadius:3,
+                        background: toolColor(tool), transition:'width 0.4s',
+                      }}/>
+                    </div>
+                    {/* Which stages */}
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:3, marginTop:4 }}>
+                      {stageIdxs.map(idx => (
+                        <button key={idx} className="btn btn-ghost"
+                          onClick={() => onEditStage(idx)}
+                          style={{ fontSize:9, padding:'1px 5px', borderRadius:3, border:'1px solid var(--border)', color:'var(--muted)' }}>
+                          {pipeline.stages[idx]?.column || `#${idx+1}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="card" style={{ padding:14, color:'var(--muted)', fontSize:12, textAlign:'center' }}>
+              <Wrench size={20} style={{ marginBottom:8 }}/>
+              <div>Tools will appear here once agents share the same tool across stages.</div>
+            </div>
+          )}
+        </div>
+
+        {/* Shared Skills */}
+        <div style={{ flex:1, minWidth:0 }}>
+          <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', letterSpacing:'0.08em', marginBottom:12, textTransform:'uppercase', display:'flex', alignItems:'center', gap:6 }}>
+            🔧 Shared Skills
+          </div>
+
+          {sharedSkills.length > 0 ? (
+            <div style={{ display:'flex', flexDirection:'column', gap:10 }}>
+              {sharedSkills.map(sk => {
+                const stageIdxs = skillStageMap[sk] || []
+                const pct = Math.round((stageIdxs.length / Math.max(aiStages.length, 1)) * 100)
+                const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                return (
+                  <div key={sk}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+                      <span title={sk} style={{
+                        fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4,
+                        background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                        color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                        flexShrink:0,
+                      }}>{label}</span>
+                      <span style={{ fontSize:11, color:'var(--muted)', marginLeft:'auto', flexShrink:0 }}>
+                        {stageIdxs.length}/{aiStages.length} stages
+                      </span>
+                    </div>
+                    <div style={{ height:6, borderRadius:3, background:'var(--surface2)', overflow:'hidden' }}>
+                      <div style={{ height:'100%', width:`${pct}%`, borderRadius:3, background:'var(--green)', transition:'width 0.4s' }}/>
+                    </div>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:3, marginTop:4 }}>
+                      {stageIdxs.map(idx => (
+                        <button key={idx} className="btn btn-ghost"
+                          onClick={() => onEditStage(idx)}
+                          style={{ fontSize:9, padding:'1px 5px', borderRadius:3, border:'1px solid var(--border)', color:'var(--muted)' }}>
+                          {pipeline.stages[idx]?.column || `#${idx+1}`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="card" style={{ padding:14, color:'var(--muted)', fontSize:12, textAlign:'center' }}>
+              <div style={{ fontSize:20, marginBottom:8 }}>🔧</div>
+              <div>Skills shared across 2+ stages will appear here.</div>
+            </div>
+          )}
+        </div>
+
+        {/* Pipeline stats summary */}
+        <div style={{ width:200, flexShrink:0 }}>
+          <div className="card" style={{ padding:12 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10 }}>
+              <span style={{ fontSize:11, fontWeight:600, color:'var(--muted)', flex:1 }}>Pipeline Stats</span>
+              <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                <div className={`dot ${running ? 'dot-green' : 'dot-muted'}`} style={{ width:7, height:7, borderRadius:'50%' }}/>
+                <span style={{ fontSize:11, fontWeight:600, color: running ? 'var(--green)' : 'var(--muted)' }}>
+                  {running ? 'Running' : 'Paused'}
+                </span>
+              </div>
+            </div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+              {[
+                { label:'Stages', value: pipeline.stages.length },
+                { label:'AI stages', value: aiStages.length },
+                { label:'Human gates', value: pipeline.stages.length - aiStages.length },
+                { label:'Shared tools', value: sharedTools.length },
+                { label:'Shared skills', value: sharedSkills.length },
+                { label:'Lint errors', value: agents.filter(a => a.lint_errors?.length).length, warn: true },
+              ].map(({ label, value, warn }) => (
+                <div key={label} style={{ textAlign:'center', padding:'6px 0' }}>
+                  <div style={{ fontSize:20, fontWeight:800, color: warn && value > 0 ? 'var(--yellow)' : 'var(--accent)' }}>{value}</div>
+                  <div style={{ fontSize:10, color:'var(--muted)' }}>{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Import Modal ──────────────────────────────────────────────────────────────
+
+function ImportModal({ onImport, onClose }: {
+  onImport: (yaml: string, pipelineId?: string, overwrite?: boolean) => Promise<void>
+  onClose: () => void
+}) {
+  const [yamlText, setYamlText] = useState('')
+  const [pipelineId, setPipelineId] = useState('')
+  const [overwrite, setOverwrite] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [error, setError] = useState('')
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) file.text().then(t => { setYamlText(t); setError('') })
+  }
+
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText()
+      setYamlText(text)
+      setError('')
+    } catch { setError('Clipboard permission denied — paste manually below') }
+  }
+
+  const handleImport = async () => {
+    if (!yamlText.trim()) { setError('Paste or upload YAML content first'); return }
+    setImporting(true)
+    setError('')
+    try {
+      await onImport(yamlText, pipelineId || undefined, overwrite)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  return (
+    <div style={{
+      position:'fixed', inset:0, zIndex:1000, display:'flex', alignItems:'center', justifyContent:'center',
+      background:'rgba(0,0,0,0.6)', backdropFilter:'blur(4px)',
+    }} onClick={onClose}>
+      <div style={{
+        background:'var(--surface)', border:'1px solid var(--border)', borderRadius:12,
+        padding:24, width:580, maxHeight:'85vh', overflow:'auto',
+      }} onClick={e => e.stopPropagation()}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:16 }}>
+          <h2 style={{ fontSize:16, fontWeight:600 }}>Import Pipeline from YAML</h2>
+          <button className="btn btn-ghost" onClick={onClose} style={{ padding:4 }}><X size={16}/></button>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <label className="form-label">Pipeline ID <span style={{ color:'var(--muted)', fontWeight:400 }}>(optional — derived from name if blank)</span></label>
+          <input className="form-input" value={pipelineId}
+            onChange={e => setPipelineId(e.target.value)}
+            placeholder="e.g. my-pipeline"/>
+        </div>
+
+        <div style={{ display:'flex', gap:8, marginBottom:10 }}>
+          <label className="btn btn-secondary" style={{ fontSize:12, cursor:'pointer' }}>
+            <FileUp size={12}/> Upload .yml
+            <input type="file" accept=".yml,.yaml" hidden onChange={handleFile}/>
+          </label>
+          <button className="btn btn-secondary" style={{ fontSize:12 }} onClick={handlePaste}>
+            <Clipboard size={12}/> Paste from clipboard
+          </button>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <label className="form-label">YAML Config</label>
+          <textarea className="form-input" rows={14} value={yamlText}
+            onChange={e => { setYamlText(e.target.value); setError('') }}
+            placeholder={'name: My Pipeline\nplugin_id: ghe-roommate\nstages:\n  - column: Todo\n    actor: ai\n    prompt: "Process issue #${ISSUE_NUM}"\n  - column: Review\n    actor: human'}
+            style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
+        </div>
+
+        <label style={{ display:'flex', alignItems:'center', gap:8, marginBottom:16, cursor:'pointer', fontSize:13 }}>
+          <input type="checkbox" checked={overwrite} onChange={e => setOverwrite(e.target.checked)}/>
+          Overwrite if pipeline ID already exists
+        </label>
+
+        {error && (
+          <div style={{
+            color:'var(--red)', fontSize:12, marginBottom:12,
+            padding:'8px 10px', background:'color-mix(in srgb, var(--red) 10%, transparent)',
+            borderRadius:6, border:'1px solid color-mix(in srgb, var(--red) 25%, transparent)',
+          }}>{error}</div>
+        )}
+
+        <div style={{ display:'flex', justifyContent:'flex-end', gap:8 }}>
+          <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleImport} disabled={importing || !yamlText.trim()}>
+            <Upload size={14}/> {importing ? 'Importing…' : 'Import'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Main Component ────────────────────────────────────────────────────────────
 
 export default function PipelineEditor() {
   const { id } = useParams<{ id: string }>()
@@ -86,17 +883,27 @@ export default function PipelineEditor() {
   const isNew = id === 'new'
 
   const [pipeline, setPipeline] = useState<PipelineData | null>(null)
+  const [pipelines, setPipelines] = useState<PipelineSummary[]>([])
   const [selectedStage, setSelectedStage] = useState<number>(-1)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [connectors, setConnectors] = useState<any[]>([])
   const [agents, setAgents] = useState<AgentInfo[]>([])
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [fetchingColumns, setFetchingColumns] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
+  const [showImport, setShowImport] = useState(false)
+  const [viewMode, setViewMode] = useState(!isNew)
+  const [running, setRunning] = useState(false)
+  const [toggling, setToggling] = useState(false)
 
   useEffect(() => {
     fetch('/api/plugins').then(r => r.json()).then(setConnectors).catch(() => {})
     fetch('/api/agents').then(r => r.json()).then(setAgents).catch(() => {})
+    fetch('/api/pipelines').then(r => r.json())
+      .then((list: any[]) => setPipelines(list.map(p => ({ id: p.id, name: p.name }))))
+      .catch(() => {})
 
     if (isNew) {
       setPipeline({
@@ -104,11 +911,14 @@ export default function PipelineEditor() {
         project_owner: '', project_number: 0, board_path: null,
         stages: [], poll_interval: 300, max_issues: 50, max_retries: 3,
         session_timeout_hours: 4, models: [], allowed_repos: [], findings: null,
+        orchestrator_agent_id: '',
+        analytics_connector_id: '',
       })
     } else {
       fetch(`/api/pipelines/${id}`).then(r => r.json()).then(data => {
         data.stages = (data.stages || []).map(normalizeStage)
         setPipeline(data)
+        setRunning(!!data.enabled)
         if (data.stages.length > 0) setSelectedStage(0)
       })
     }
@@ -123,7 +933,21 @@ export default function PipelineEditor() {
     setPipeline(prev => {
       if (!prev) return prev
       const stages = [...prev.stages]
+      const oldCol = stages[idx].column
       stages[idx] = { ...stages[idx], ...patch }
+      // If the column name changed, cascade the rename to all on_success/on_failure/on_timeout refs
+      if (patch.column !== undefined && patch.column !== oldCol) {
+        const newCol = patch.column
+        for (let j = 0; j < stages.length; j++) {
+          if (j === idx) continue
+          stages[j] = {
+            ...stages[j],
+            on_success: stages[j].on_success === oldCol ? newCol : stages[j].on_success,
+            on_failure: stages[j].on_failure === oldCol ? newCol : stages[j].on_failure,
+            on_timeout: stages[j].on_timeout === oldCol ? newCol : stages[j].on_timeout,
+          }
+        }
+      }
       return { ...prev, stages }
     })
     setDirty(true)
@@ -133,7 +957,7 @@ export default function PipelineEditor() {
     if (!pipeline) return
     const newStage: Stage = {
       column: '', actor: 'ai', agent_id: '', task_prompt: '',
-      prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
+      prompt: '', on_success: '', on_failure: '', on_failure_label: '', on_timeout: '', env: {},
     }
     update({ stages: [...pipeline.stages, newStage] })
     setSelectedStage(pipeline.stages.length)
@@ -141,39 +965,79 @@ export default function PipelineEditor() {
 
   const removeStage = (idx: number) => {
     if (!pipeline) return
+    const stage = pipeline.stages[idx]
+    if (stage.prompt || stage.task_prompt) {
+      if (!window.confirm(`Remove stage "${stage.column || '(unnamed)'}"? Its prompt will be lost.`)) return
+    }
     const stages = pipeline.stages.filter((_, i) => i !== idx)
     update({ stages })
-    setSelectedStage(Math.min(selectedStage, stages.length - 1))
+    setSelectedStage(prev => {
+      if (prev === idx) return Math.min(idx, stages.length - 1)
+      if (prev > idx) return prev - 1
+      return prev
+    })
+  }
+
+  const moveStage = (idx: number, direction: -1 | 1) => {
+    if (!pipeline) return
+    const target = idx + direction
+    if (target < 0 || target >= pipeline.stages.length) return
+    const stages = [...pipeline.stages]
+    ;[stages[idx], stages[target]] = [stages[target], stages[idx]]
+    update({ stages })
+    setSelectedStage(target)
   }
 
   const fetchColumns = async () => {
     if (!pipeline?.plugin_id || !pipeline.project_owner || !pipeline.project_number) return
+    const hasContent = pipeline.stages.some(s => s.prompt || s.task_prompt)
+    if (hasContent && !window.confirm('Fetching board columns will replace all current stages and their prompts. Continue?')) return
     setFetchingColumns(true)
+    setFetchError(null)
     try {
       const resp = await fetch(
         `/api/pipelines/board-columns/${pipeline.plugin_id}?owner=${pipeline.project_owner}&number=${pipeline.project_number}`
       )
       if (!resp.ok) throw new Error(await resp.text())
       const { columns } = await resp.json()
-      // Auto-create stages from columns
       const stages: Stage[] = columns.map((col: string) => ({
         column: col,
         actor: ['Review', 'Done', 'Backlog'].some(h => col.toLowerCase().includes(h.toLowerCase())) ? 'human' : 'ai',
         agent_id: '', task_prompt: '',
-        prompt: '', on_success: '', on_failure: '', on_timeout: '', env: {},
+        prompt: '', on_success: '', on_failure: '', on_failure_label: '', on_timeout: '', env: {},
       }))
       update({ stages })
       if (stages.length > 0) setSelectedStage(0)
     } catch (e: any) {
-      alert('Failed to fetch columns: ' + e.message)
+      setFetchError('Failed to fetch columns: ' + e.message)
     } finally {
       setFetchingColumns(false)
+    }
+  }
+
+  const toggleRunning = async () => {
+    if (!pipeline || isNew) return
+    setToggling(true)
+    setSaveError(null)
+    try {
+      const endpoint = running ? 'stop' : 'start'
+      const resp = await fetch(`/api/pipelines/${pipeline.id}/${endpoint}`, { method: 'POST' })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: `Failed to ${endpoint} pipeline` }))
+        throw new Error(err.detail || `Failed to ${endpoint} pipeline`)
+      }
+      setRunning(r => !r)
+    } catch (e: any) {
+      setSaveError(e.message)
+    } finally {
+      setToggling(false)
     }
   }
 
   const save = async () => {
     if (!pipeline) return
     setSaving(true)
+    setSaveError(null)
     try {
       const method = isNew ? 'POST' : 'PUT'
       const url = isNew ? '/api/pipelines' : `/api/pipelines/${pipeline.id}`
@@ -188,12 +1052,74 @@ export default function PipelineEditor() {
       }
       const saved = await resp.json()
       setDirty(false)
+      // Refresh pipeline list
+      fetch('/api/pipelines').then(r => r.json())
+        .then((list: any[]) => setPipelines(list.map(p => ({ id: p.id, name: p.name }))))
+        .catch(() => {})
       if (isNew) navigate(`/pipelines/${saved.id}`, { replace: true })
     } catch (e: any) {
-      alert(e.message)
+      setSaveError(e.message)
     } finally {
       setSaving(false)
     }
+  }
+
+  // Unsaved-changes guard — browser back/refresh
+  useEffect(() => {
+    if (!dirty) return
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = '' }
+    window.addEventListener('beforeunload', handler)
+    return () => window.removeEventListener('beforeunload', handler)
+  }, [dirty])
+
+  // Ctrl+S / Cmd+S to save (only in Edit mode)
+  const saveRef = useRef(save)
+  useEffect(() => { saveRef.current = save })
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's' && !viewMode) {
+        e.preventDefault()
+        saveRef.current()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [viewMode])
+
+  const navigateSafe = (path: string) => {
+    if (dirty && !window.confirm('You have unsaved changes. Leave without saving?')) return
+    navigate(path)
+  }
+
+  const handleExport = () => {
+    if (!pipeline) return
+    const yaml = exportYaml(pipeline)
+    const blob = new Blob([yaml], { type: 'text/yaml' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${pipeline.id || 'pipeline'}.yml`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImport = async (yamlText: string, pipelineId?: string, overwrite?: boolean) => {
+    // If overwrite requested, delete existing pipeline first
+    if (overwrite && pipelineId) {
+      await fetch(`/api/pipelines/${pipelineId}`, { method: 'DELETE' })
+    }
+    const resp = await fetch('/api/pipelines/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config_yaml: yamlText, pipeline_id: pipelineId }),
+    })
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: 'Import failed' }))
+      throw new Error(err.detail || 'Import failed')
+    }
+    const imported = await resp.json()
+    setShowImport(false)
+    navigate(`/pipelines/${imported.id}`, { replace: true })
   }
 
   if (!pipeline) return (
@@ -207,27 +1133,118 @@ export default function PipelineEditor() {
     : null
 
   const githubConnectors = connectors.filter(p => p.plugin_type === 'github')
+  const analyticsConnectors = connectors.filter(p => p.plugin_type === 'analytics')
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'calc(100vh - 56px - 48px)' }}>
+      {showImport && <ImportModal onImport={handleImport} onClose={() => setShowImport(false)}/>}
+
       {/* Top bar */}
       <div style={{
         display:'flex', alignItems:'center', gap:12,
         padding:'0 0 16px', borderBottom:'1px solid var(--border)', marginBottom:16,
       }}>
-        <button className="btn btn-ghost" onClick={() => navigate('/pipelines')} style={{ padding:'6px 8px' }}>
+        <button className="btn btn-ghost" onClick={() => navigateSafe('/')} style={{ padding:'6px 8px' }}>
           <ArrowLeft size={16}/>
         </button>
-        <h1 style={{ fontSize:18, fontWeight:700, flex:1 }}>
-          {isNew ? 'New Pipeline' : pipeline.name}
-        </h1>
+
+        {/* Pipeline selector dropdown */}
+        <select
+          className="form-input"
+          value={pipeline.id}
+          onChange={e => {
+            const val = e.target.value
+            if (val === '__new__') navigateSafe('/pipelines/new')
+            else if (val) navigateSafe(`/pipelines/${val}`)
+          }}
+          style={{ width:200, fontSize:13, fontWeight:600 }}
+        >
+          {isNew && <option value="">New Pipeline</option>}
+          {pipelines.map(p => <option key={p.id} value={p.id}>{p.name || p.id}</option>)}
+          <option value="__new__">＋ New pipeline…</option>
+        </select>
+
+        <div style={{ flex:1 }}/>
         {dirty && <span style={{ fontSize:11, color:'var(--yellow)' }}>unsaved</span>}
-        <button className="btn btn-primary" onClick={save} disabled={saving || !pipeline.id || !pipeline.name}>
-          <Save size={14}/> {saving ? 'Saving…' : 'Save'}
-        </button>
+
+        {/* Mode toggle */}
+        <div style={{ display:'flex', borderRadius:6, border:'1px solid var(--border)', overflow:'hidden' }}>
+          <button
+            className={`btn ${viewMode ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius:0, padding:'5px 10px', fontSize:12, gap:5 }}
+            onClick={() => setViewMode(true)}>
+            <Eye size={13}/> Blueprint
+          </button>
+          <button
+            className={`btn ${!viewMode ? 'btn-primary' : 'btn-ghost'}`}
+            style={{ borderRadius:0, padding:'5px 10px', fontSize:12, gap:5, borderLeft:'1px solid var(--border)' }}
+            onClick={() => setViewMode(false)}>
+            <Pencil size={13}/> Edit
+          </button>
+        </div>
+
+        {/* Start / Pause */}
+        {!isNew && (
+          <button
+            className={`btn ${running ? 'btn-secondary' : 'btn-primary'}`}
+            style={{ fontSize:12, padding:'5px 12px', gap:5 }}
+            onClick={toggleRunning}
+            disabled={toggling}>
+            {running
+              ? <><Pause size={13}/> {toggling ? 'Pausing…' : 'Pause'}</>
+              : <><Play size={13}/> {toggling ? 'Starting…' : 'Start'}</>}
+          </button>
+        )}
+
+        {viewMode ? (
+          <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
+            title="Export pipeline as YAML" disabled={isNew}>
+            <Download size={14}/> Export
+          </button>
+        ) : (
+          <>
+            <button className="btn btn-ghost" onClick={() => setShowImport(true)} style={{ fontSize:12, padding:'6px 10px' }}
+              title="Import pipeline from YAML">
+              <Upload size={14}/> Import
+            </button>
+            <button className="btn btn-ghost" onClick={handleExport} style={{ fontSize:12, padding:'6px 10px' }}
+              title="Export pipeline as YAML" disabled={isNew}>
+              <Download size={14}/> Export
+            </button>
+            <button className="btn btn-primary" onClick={save} disabled={saving || !pipeline.id || !pipeline.name}>
+              <Save size={14}/> {saving ? 'Saving…' : 'Save'}
+            </button>
+          </>
+        )}
       </div>
 
-      {/* Main content — two columns */}
+      {/* Error banner (save / toggle errors) */}
+      {saveError && (
+        <div style={{
+          display:'flex', alignItems:'center', gap:8, padding:'8px 12px',
+          background:'color-mix(in srgb, var(--red) 10%, transparent)',
+          border:'1px solid color-mix(in srgb, var(--red) 25%, transparent)',
+          borderRadius:6, marginBottom:12, fontSize:12, color:'var(--red)',
+        }}>
+          <span style={{ flex:1 }}>{saveError}</span>
+          <button className="btn btn-ghost" onClick={() => setSaveError(null)} style={{ padding:2, color:'var(--red)' }}>
+            <X size={12}/>
+          </button>
+        </div>
+      )}
+
+      {/* ── Blueprint / Editor content ── */}
+      {viewMode ? (
+        <div style={{ flex:1, overflow:'auto' }}>
+          <PipelineBlueprint
+            pipeline={pipeline}
+            agents={agents}
+            running={running}
+            onEditStage={idx => { setViewMode(false); setSelectedStage(idx) }}
+            onEdit={() => setViewMode(false)}
+          />
+        </div>
+      ) : (
       <div style={{ display:'flex', flex:1, gap:16, overflow:'hidden' }}>
         {/* Left: pipeline config + stages */}
         <div style={{ width:320, flexShrink:0, overflow:'auto', paddingRight:8 }}>
@@ -267,23 +1284,48 @@ export default function PipelineEditor() {
                 onChange={e => update({ project_number: parseInt(e.target.value) || 0 })}/>
             </div>
           </div>
-          <button className="btn btn-secondary" style={{ width:'100%', marginBottom:20, fontSize:12 }}
+          <button className="btn btn-secondary" style={{ width:'100%', marginBottom:4, fontSize:12 }}
             onClick={fetchColumns} disabled={fetchingColumns || !pipeline.plugin_id || !pipeline.project_owner || !pipeline.project_number}>
             {fetchingColumns ? <><div className="spinner" style={{ width:12, height:12 }}/> Fetching…</> :
               <><RefreshCw size={12}/> Fetch Board Columns</>}
           </button>
+          {fetchError && (
+            <div style={{ fontSize:11, color:'var(--red)', marginBottom:12, padding:'4px 6px',
+              background:'color-mix(in srgb, var(--red) 8%, transparent)', borderRadius:4 }}>
+              {fetchError}
+            </div>
+          )}
 
           {/* Stages */}
           <div className="section-label">Stages</div>
           <div style={{ display:'flex', flexDirection:'column', gap:4, marginBottom:12 }}>
-            {pipeline.stages.map((stage, i) => (
+            {pipeline.stages.length === 0 ? (
+              <div style={{
+                padding:'16px 12px', textAlign:'center', color:'var(--muted)', fontSize:12,
+                border:'1px dashed var(--border)', borderRadius:6,
+              }}>
+                No stages yet. Fetch from board or add manually.
+              </div>
+            ) : pipeline.stages.map((stage, i) => (
               <div key={i}
                 className={`card card-interactive ${selectedStage === i ? 'card-active' : ''}`}
                 onClick={() => setSelectedStage(i)}
                 style={{
-                  padding:'8px 12px', display:'flex', alignItems:'center', gap:8, cursor:'pointer',
+                  padding:'8px 12px', display:'flex', alignItems:'center', gap:6, cursor:'pointer',
                 }}>
-                <div style={{ color:'var(--muted)', cursor:'grab' }}><GripVertical size={12}/></div>
+                {/* Reorder arrows */}
+                <div style={{ display:'flex', flexDirection:'column', gap:0 }}>
+                  <button className="btn btn-ghost" style={{ padding:1, lineHeight:0 }}
+                    disabled={i === 0}
+                    onClick={e => { e.stopPropagation(); moveStage(i, -1) }}>
+                    <ArrowUp size={10}/>
+                  </button>
+                  <button className="btn btn-ghost" style={{ padding:1, lineHeight:0 }}
+                    disabled={i === pipeline.stages.length - 1}
+                    onClick={e => { e.stopPropagation(); moveStage(i, 1) }}>
+                    <ArrowDown size={10}/>
+                  </button>
+                </div>
                 <div style={{
                   width:20, height:20, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
                   background: stage.actor === 'ai' ? 'color-mix(in srgb, var(--accent) 15%, transparent)' : 'var(--surface2)',
@@ -292,12 +1334,18 @@ export default function PipelineEditor() {
                   {stage.actor === 'ai' ? <Bot size={12}/> : <User size={12}/>}
                 </div>
                 <span style={{ flex:1, fontSize:13, fontWeight:500 }}>{stage.column || '(unnamed)'}</span>
-                {i > 0 && (
-                  <button className="btn btn-ghost" style={{ padding:2 }}
-                    onClick={e => { e.stopPropagation(); removeStage(i) }}>
-                    <Trash2 size={12}/>
-                  </button>
+                {/* Prompt indicator */}
+                {(stage.prompt || stage.task_prompt) && (
+                  <span title={`${(stage.prompt || stage.task_prompt).length} chars`} style={{
+                    fontSize:9, padding:'1px 4px', borderRadius:3,
+                    background:'color-mix(in srgb, var(--accent) 20%, transparent)',
+                    color:'var(--accent)', fontWeight:600,
+                  }}>P</span>
                 )}
+                <button className="btn btn-ghost" style={{ padding:2 }}
+                  onClick={e => { e.stopPropagation(); removeStage(i) }}>
+                  <Trash2 size={12}/>
+                </button>
               </div>
             ))}
           </div>
@@ -330,6 +1378,39 @@ export default function PipelineEditor() {
             </div>
           </div>
 
+          {/* Analytics connector */}
+          <div className="section-label" style={{ marginTop:16 }}>Analytics DB Connector</div>
+          <select className="form-input" style={{ width:'100%', marginBottom:8 }}
+            value={pipeline.analytics_connector_id || ''}
+            onChange={e => update({ analytics_connector_id: e.target.value })}>
+            <option value="">— None (no analytics) —</option>
+            {analyticsConnectors.map(a => (
+              <option key={a.id} value={a.id}>{a.display_name || a.id}</option>
+            ))}
+            {analyticsConnectors.length === 0 && (
+              <option disabled value="">No analytics connectors — add one in Connectors page</option>
+            )}
+          </select>
+
+          {/* Orchestrator */}
+          <div className="section-label" style={{ marginTop:16 }}>Orchestrator Agent</div>
+          {(() => {
+            const orchAgents = agents.filter(a => a.is_orchestrator)
+            return (
+              <select className="form-input" style={{ width:'100%', marginBottom:8 }}
+                value={pipeline.orchestrator_agent_id || ''}
+                onChange={e => update({ orchestrator_agent_id: e.target.value })}>
+                <option value="">— None —</option>
+                {orchAgents.map(a => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+                {orchAgents.length === 0 && (
+                  <option disabled value="">No orchestrator agents yet — mark one in the Agents page</option>
+                )}
+              </select>
+            )
+          })()}
+
           {/* Models */}
           <div className="section-label" style={{ marginTop:16 }}>Models</div>
           {pipeline.models.map((m, i) => (
@@ -341,6 +1422,9 @@ export default function PipelineEditor() {
                   update({ models })
                 }}>
                 {DEFAULT_MODELS.map(dm => <option key={dm} value={dm}>{dm}</option>)}
+                {!DEFAULT_MODELS.includes(m.model) && m.model && (
+                  <option key={m.model} value={m.model}>{m.model}</option>
+                )}
               </select>
               <input className="form-input" type="number" value={m.priority} style={{ width:50 }}
                 onChange={e => {
@@ -446,20 +1530,20 @@ export default function PipelineEditor() {
 
               {sel.actor === 'ai' && (
                 <>
-                  {/* Agent selector */}
+                  {/* Agent selector — agent library is the only way to configure AI behaviour */}
                   <div style={{ marginBottom:16 }}>
                     <label className="form-label">Agent</label>
                     <select className="form-input"
                       value={sel.agent_id || ''}
                       onChange={e => updateStage(selectedStage, { agent_id: e.target.value })}>
-                      <option value="">— No agent (use inline prompt) —</option>
+                      <option value="">— Unassigned —</option>
                       {agents.map(a => (
                         <option key={a.id} value={a.id}>{a.name} ({a.id})</option>
                       ))}
                     </select>
-                    {sel.agent_id && (() => {
+                    {sel.agent_id ? (() => {
                       const ag = agents.find(a => a.id === sel.agent_id)
-                      if (!ag) return <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>Agent not found in library</p>
+                      if (!ag) return <p style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>Agent not found in library — edit in the Agents page</p>
                       return (
                         <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 6, background: 'var(--surface2)', border: '1px solid var(--border)', fontSize: 12 }}>
                           <span style={{ color: 'var(--muted)' }}>{ag.description}</span>
@@ -469,101 +1553,82 @@ export default function PipelineEditor() {
                           </div>
                         </div>
                       )
-                    })()}
+                    })() : (
+                      <p style={{ fontSize: 11, color: 'var(--yellow)', marginTop: 6 }}>
+                        ⚠ No agent assigned. Go to <strong>Agents</strong> to create or upload an agent, then assign it here.
+                      </p>
+                    )}
                   </div>
 
-                  {/* Task prompt (shown when agent is selected) */}
+                  {/* Task prompt — short override instruction, expanded at runtime */}
                   {sel.agent_id && (
                     <div style={{ marginBottom:16 }}>
-                      <label className="form-label">Task Prompt</label>
+                      <label className="form-label">Task Prompt <span style={{ fontWeight:400, color:'var(--muted)' }}>(optional override)</span></label>
                       <textarea className="form-input" rows={3}
                         value={sel.task_prompt || ''}
                         onChange={e => updateStage(selectedStage, { task_prompt: e.target.value })}
                         placeholder="Process issue #${ISSUE_NUM} at stage ${ISSUE_STAGE}"
                         style={{ fontFamily:'ui-monospace, monospace', fontSize:12 }}/>
                       <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
-                        Short instruction passed to the agent. Template variables are expanded.
+                        Short instruction prepended to the agent prompt. Template variables are expanded. Leave empty to use the agent as-is.
                       </p>
-                    </div>
-                  )}
-
-                  {/* Inline prompt (shown when no agent selected) */}
-                  {!sel.agent_id && (
-                    <div style={{ marginBottom:16 }}>
-                      <label className="form-label">Prompt</label>
-                      <textarea className="form-input" rows={16} value={sel.prompt}
-                        onChange={e => updateStage(selectedStage, { prompt: e.target.value })}
-                        placeholder="# Stage Prompt&#10;&#10;Write the agent instructions here…"
-                        style={{ fontFamily:'ui-monospace, monospace', fontSize:12, lineHeight:1.5 }}/>
-                      <div style={{ display:'flex', alignItems:'center', gap:8, marginTop:6 }}>
-                        <label className="btn btn-ghost" style={{ fontSize:11, padding:'4px 8px', cursor:'pointer' }}>
-                          <Upload size={10}/> Load from file
-                          <input type="file" accept=".md,.txt" hidden onChange={e => {
-                            const file = e.target.files?.[0]
-                            if (file) file.text().then(text => updateStage(selectedStage, { prompt: text }))
-                          }}/>
-                        </label>
+                      <div style={{ display:'flex', flexWrap:'wrap', gap:4, marginTop:6 }}>
+                        {TEMPLATE_VARS.map(v => (
+                          <code key={v} style={{
+                            fontSize:10, padding:'2px 6px', borderRadius:4,
+                            background:'var(--surface2)', border:'1px solid var(--border)',
+                            cursor:'pointer', color:'var(--cyan)',
+                          }} onClick={() => updateStage(selectedStage, { task_prompt: (sel.task_prompt || '') + ' ' + v })}>{v}</code>
+                        ))}
+                        {Object.keys(sel.env).map(k => (
+                          <code key={k} style={{
+                            fontSize:10, padding:'2px 6px', borderRadius:4,
+                            background:'color-mix(in srgb, var(--purple) 12%, transparent)',
+                            border:'1px solid color-mix(in srgb, var(--purple) 25%, transparent)',
+                            color:'var(--purple)',
+                          }}>${'{' + k + '}'}</code>
+                        ))}
                       </div>
                     </div>
                   )}
 
-                  <div style={{ marginBottom:16 }}>
-                    <label className="form-label">Template Variables</label>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
-                      {TEMPLATE_VARS.map(v => (
-                        <code key={v} style={{
-                          fontSize:10, padding:'2px 6px', borderRadius:4,
-                          background:'var(--surface2)', border:'1px solid var(--border)',
-                          cursor:'pointer', color:'var(--cyan)',
-                        }} onClick={() => {
-                          // Insert at cursor or append
-                          updateStage(selectedStage, { prompt: sel.prompt + ' ' + v })
-                        }}>{v}</code>
-                      ))}
-                      {Object.keys(sel.env).map(k => (
-                        <code key={k} style={{
-                          fontSize:10, padding:'2px 6px', borderRadius:4,
-                          background:'color-mix(in srgb, var(--purple) 12%, transparent)',
-                          border:'1px solid color-mix(in srgb, var(--purple) 25%, transparent)',
-                          color:'var(--purple)',
-                        }}>${'{' + k + '}'}</code>
-                      ))}
-                    </div>
-                  </div>
-
                   {/* Transitions (advanced) */}
                   <div className="divider"/>
                   <div className="section-label">Transitions</div>
-                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:8, marginBottom:16 }}>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8, marginBottom:16 }}>
                     <div>
-                      <label className="form-label">On Success</label>
+                      <label className="form-label">On Success →</label>
                       <select className="form-input" value={sel.on_success}
                         onChange={e => updateStage(selectedStage, { on_success: e.target.value })}>
-                        <option value="">(next stage)</option>
+                        <option value="">(no automatic move)</option>
                         {pipeline.stages.map((s, i) => i !== selectedStage && (
                           <option key={s.column} value={s.column}>{s.column}</option>
                         ))}
                       </select>
+                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:3 }}>
+                        Stage to move issue to after a successful session.
+                      </p>
                     </div>
-                    <div>
-                      <label className="form-label">On Failure</label>
-                      <select className="form-input" value={sel.on_failure}
-                        onChange={e => updateStage(selectedStage, { on_failure: e.target.value })}>
-                        <option value="">(stay)</option>
-                        {pipeline.stages.map((s, i) => i !== selectedStage && (
-                          <option key={s.column} value={s.column}>{s.column}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="form-label">On Timeout</label>
-                      <select className="form-input" value={sel.on_timeout}
-                        onChange={e => updateStage(selectedStage, { on_timeout: e.target.value })}>
-                        <option value="">(stay + label)</option>
-                        {pipeline.stages.map((s, i) => i !== selectedStage && (
-                          <option key={s.column} value={s.column}>{s.column}</option>
-                        ))}
-                      </select>
+                    <div style={{ display:'flex', flexDirection:'column', gap:6 }}>
+                      <div>
+                        <label className="form-label">On Failure → Stage</label>
+                        <select className="form-input" value={sel.on_failure}
+                          onChange={e => updateStage(selectedStage, { on_failure: e.target.value })}>
+                          <option value="">(stay in current stage)</option>
+                          {pipeline.stages.map((s, i) => i !== selectedStage && (
+                            <option key={s.column} value={s.column}>{s.column}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="form-label">On Failure → Add Label</label>
+                        <input className="form-input" value={sel.on_failure_label}
+                          placeholder="e.g. hil-failed  (optional)"
+                          onChange={e => updateStage(selectedStage, { on_failure_label: e.target.value })}/>
+                      </div>
+                      <p style={{ fontSize:10, color:'var(--muted)', marginTop:0 }}>
+                        Applies label and/or moves issue on session failure.
+                      </p>
                     </div>
                   </div>
 
@@ -615,6 +1680,7 @@ export default function PipelineEditor() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }

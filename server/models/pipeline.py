@@ -25,6 +25,7 @@ class PipelineStage(BaseModel):
     prompt: str = ""
     on_success: str = ""
     on_failure: str = ""
+    on_failure_label: str = ""
     on_timeout: str = ""
     env: Dict[str, str] = Field(default_factory=dict)
 
@@ -34,6 +35,7 @@ class PipelineCreate(BaseModel):
     name: str
     enabled: bool = True
     plugin_id: str
+    analytics_connector_id: Optional[str] = ""   # links to AnalyticsConnector instance
     board_type: str = "github"
     project_owner: Optional[str] = None
     project_number: Optional[int] = None
@@ -46,6 +48,7 @@ class PipelineCreate(BaseModel):
     models: List[ModelConfig] = Field(default_factory=list)
     allowed_repos: List[str] = Field(default_factory=list)
     findings: Optional[FindingsBoard] = None
+    working_dir: Optional[str] = None
 
 
 class PipelineUpdate(BaseModel):
@@ -64,3 +67,6 @@ class PipelineUpdate(BaseModel):
     models: Optional[List[ModelConfig]] = None
     allowed_repos: Optional[List[str]] = None
     findings: Optional[FindingsBoard] = None
+    working_dir: Optional[str] = None
+    orchestrator_agent_id: Optional[str] = None
+    analytics_connector_id: Optional[str] = ""  # links to AnalyticsConnector instance

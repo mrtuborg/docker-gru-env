@@ -1,108 +1,322 @@
-import { useEffect, useState } from 'react'
-import { RefreshCw, DollarSign, Clock, Activity } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { RefreshCw, DollarSign, Clock, Activity, CheckCircle2, XCircle, Cpu, Zap } from 'lucide-react'
 
-function StatCard({ icon, label, value, sub }: { icon: any; label: string; value: string | number; sub?: string }) {
-  const Icon = icon
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function fmtDur(s: number | null | undefined): string {
+  if (s == null) return '—'
+  if (s < 60) return `${Math.round(s)}s`
+  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`
+}
+
+function fmtCost(usd: number | null | undefined): string {
+  if (usd == null) return '—'
+  if (usd === 0) return '$0'
+  return `$${usd.toFixed(4)}`
+}
+
+function fmtTokens(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`
+  return String(n)
+}
+
+function fmtNanoAiu(n: number | null | undefined): string {
+  if (n == null || n === 0) return '—'
+  return `${(n / 1_000_000).toFixed(0)} µAIU`
+}
+
+function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '—'
+  const diff = Math.floor((Date.now() - d.getTime()) / 60_000)
+  if (diff < 1) return 'just now'
+  if (diff < 60) return `${diff}m ago`
+  const h = Math.floor(diff / 60)
+  if (h < 24) return `${h}h ago`
+  const dy = Math.floor(h / 24)
+  if (dy < 7) return `${dy}d ago`
+  const now = new Date()
+  const mo = d.toLocaleString('en', { month: 'short' })
+  return d.getFullYear() === now.getFullYear()
+    ? `${mo} ${d.getDate()}`
+    : `${mo} ${d.getDate()} '${String(d.getFullYear()).slice(2)}`
+}
+
+// ── Stat card ─────────────────────────────────────────────────────────────────
+
+function StatCard({ icon: Icon, label, value, sub, color = 'var(--accent)' }: {
+  icon: any; label: string; value: string | number; sub?: string; color?: string
+}) {
   return (
-    <div className="card" style={{ display:'flex', alignItems:'center', gap:14, padding:'16px 18px' }}>
-      <div style={{ width:38, height:38, borderRadius:8, background:'color-mix(in srgb, var(--accent) 15%, transparent)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>
-        <Icon size={18} color="var(--accent)"/>
+    <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 16px' }}>
+      <div style={{
+        width: 36, height: 36, borderRadius: 8, flexShrink: 0,
+        background: `color-mix(in srgb, ${color} 15%, transparent)`,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
+        <Icon size={17} color={color} />
       </div>
       <div>
-        <div style={{ fontSize:20, fontWeight:700, lineHeight:1 }}>{value}</div>
-        <div style={{ fontSize:12, color:'var(--muted)', marginTop:3 }}>{label}</div>
-        {sub && <div style={{ fontSize:11, color:'var(--muted)', marginTop:1 }}>{sub}</div>}
+        <div style={{ fontSize: 20, fontWeight: 700, lineHeight: 1 }}>{value}</div>
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 1 }}>{sub}</div>}
       </div>
     </div>
   )
 }
 
+// ── Mini bar list (stage / model breakdown) ───────────────────────────────────
+
+function BreakdownList({ title, items, maxCost }: {
+  title: string
+  items: { label: string; count: number; cost: number; succeeded: number }[]
+  maxCost: number
+}) {
+  return (
+    <div className="card" style={{ padding: '14px 16px', flex: 1, minWidth: 220 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 12 }}>{title}</div>
+      {items.length === 0
+        ? <div style={{ color: 'var(--muted)', fontSize: 12 }}>No data</div>
+        : items.map(item => {
+          const pct = maxCost > 0 ? (item.cost / maxCost) * 100 : 0
+          const failCount = item.count - item.succeeded
+          return (
+            <div key={item.label} style={{ marginBottom: 10 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                <span style={{ fontSize: 12, fontWeight: 500, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={item.label}>{item.label}</span>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 11 }}>
+                  {item.succeeded > 0 && <span style={{ color: 'var(--green)' }}>✓{item.succeeded}</span>}
+                  {failCount > 0 && <span style={{ color: 'var(--red)' }}>✕{failCount}</span>}
+                  <span style={{ color: 'var(--muted)', fontFamily: 'monospace' }}>{fmtCost(item.cost)}</span>
+                </div>
+              </div>
+              <div style={{ height: 4, borderRadius: 2, background: 'var(--border)' }}>
+                <div style={{ height: '100%', width: `${pct}%`, borderRadius: 2, background: 'var(--accent)', transition: 'width .3s' }} />
+              </div>
+            </div>
+          )
+        })}
+    </div>
+  )
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────────
+
+function StatusBadge({ status }: { status: string }) {
+  const ok = ['success', 'completed', 'done'].includes(status)
+  const fail = ['failure', 'failed', 'error'].includes(status)
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600 }}>
+      {ok ? <CheckCircle2 size={12} color="var(--green)" />
+        : fail ? <XCircle size={12} color="var(--red)" />
+        : <Clock size={12} color="var(--muted)" />}
+      <span style={{ color: ok ? 'var(--green)' : fail ? 'var(--red)' : 'var(--muted)' }}>{status}</span>
+    </span>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+const DAYS_OPTIONS = [
+  { label: 'Last 7 days', value: 7 },
+  { label: 'Last 30 days', value: 30 },
+  { label: 'All time', value: 0 },
+]
+
 export default function SessionsPage() {
-  const [sessions, setSessions] = useState<any[]>([])
-  const [cost, setCost] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [pipelineId, setPipelineId] = useState<string>('')
+  const [days, setDays] = useState(7)
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(false)
 
-  const load = () => {
+  // Load first pipeline once, then fetch sessions
+  useEffect(() => {
+    fetch('/api/pipelines').then(r => r.json()).then((list: any[]) => {
+      if (Array.isArray(list) && list.length > 0) setPipelineId(list[0].id)
+    }).catch(() => {})
+  }, [])
+
+  const load = useCallback(() => {
+    if (!pipelineId) return
     setLoading(true)
-    Promise.all([
-      fetch('/api/sessions').then(r => r.json()).catch(() => []),
-      fetch('/api/sessions/cost/report').then(r => r.json()).catch(() => null),
-    ]).then(([sess, costData]) => {
-      setSessions(Array.isArray(sess) ? sess : [])
-      setCost(costData)
-    }).finally(() => setLoading(false))
-  }
+    fetch(`/api/pipelines/${pipelineId}/sessions?days=${days}`)
+      .then(r => r.json())
+      .then(setData)
+      .catch(() => setData(null))
+      .finally(() => setLoading(false))
+  }, [pipelineId, days])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
-  const totalCost = cost?.total_usd ?? sessions.reduce((sum: number, s: any) => sum + (s.cost_usd || 0), 0)
-  const totalSessions = sessions.length
+  const summary = data?.summary
+  const sessions: any[] = data?.sessions ?? []
+
+  // Breakdown lists
+  const stageItems = Object.entries(summary?.by_stage ?? {}).map(([label, v]: [string, any]) => ({
+    label, count: v.count, cost: v.cost_usd ?? 0, succeeded: v.succeeded ?? 0,
+  }))
+  const modelItems = Object.entries(summary?.by_model ?? {}).map(([label, v]: [string, any]) => ({
+    label, count: v.count, cost: v.cost_usd ?? 0, succeeded: 0,
+  }))
+  const maxStageCost = Math.max(...stageItems.map(i => i.cost), 0.0001)
+  const maxModelCost = Math.max(...modelItems.map(i => i.cost), 0.0001)
 
   return (
     <div>
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24 }}>
-        <h1 style={{ fontSize:22, fontWeight:700 }}>Sessions & Cost</h1>
-        <button className="btn btn-ghost" onClick={load}><RefreshCw size={14}/> Refresh</button>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+        <h1 style={{ fontSize: 20, fontWeight: 700, flex: 1, minWidth: 120 }}>Sessions & Cost</h1>
+
+        {/* Time range */}
+        <div style={{ display: 'flex', background: 'var(--card)', border: '1px solid var(--border)', borderRadius: 7, overflow: 'hidden' }}>
+          {DAYS_OPTIONS.map(opt => (
+            <button
+              key={opt.value}
+              onClick={() => setDays(opt.value)}
+              style={{
+                padding: '6px 12px', fontSize: 12, fontWeight: 500, border: 'none', cursor: 'pointer',
+                background: days === opt.value ? 'var(--accent)' : 'transparent',
+                color: days === opt.value ? '#fff' : 'var(--muted)',
+                transition: 'all .15s',
+              }}
+            >{opt.label}</button>
+          ))}
+        </div>
+
+        <button className="btn btn-ghost" onClick={load} disabled={loading}>
+          <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Refresh
+        </button>
       </div>
 
-      {/* Stats row */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12, marginBottom:28 }}>
-        <StatCard icon={Activity} label="Total Sessions" value={totalSessions}/>
-        <StatCard icon={DollarSign} label="Total Cost" value={`$${Number(totalCost).toFixed(4)}`}/>
-        {cost?.by_model && Object.entries(cost.by_model).slice(0,1).map(([model, data]: [string, any]) => (
-          <StatCard key={model} icon={Clock} label="Top Model" value={model.split('-').slice(-2).join('-')} sub={`$${Number(data.cost_usd||0).toFixed(4)}`}/>
-        ))}
-      </div>
-
-      {/* Session table */}
-      <div className="section-label" style={{ marginBottom:12 }}>Session Log</div>
-
-      {loading && sessions.length === 0 ? (
-        <div style={{ display:'flex', gap:12, alignItems:'center', color:'var(--muted)' }}><div className="spinner"/> Loading…</div>
-      ) : sessions.length === 0 ? (
-        <div className="card" style={{ color:'var(--muted)', textAlign:'center', padding:48 }}>
-          <div style={{ fontSize:32, marginBottom:12 }}>📊</div>
-          No sessions recorded yet.<br/>
-          <span style={{ fontSize:13 }}>Sessions appear here once Copilot runs complete and push logs to the data repo.</span>
+      {/* No pipeline configured */}
+      {!pipelineId && !loading && (
+        <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--muted)' }}>
+          No pipelines configured yet.
         </div>
-      ) : (
-        <div style={{ overflow:'auto' }}>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-            <thead>
-              <tr style={{ borderBottom:'1px solid var(--border)' }}>
-                {['Issue / ID','Started','Duration','Model','Cost','Status'].map(h => (
-                  <th key={h} style={{ textAlign:'left', padding:'6px 10px', color:'var(--muted)', fontWeight:600, fontSize:11, textTransform:'uppercase', letterSpacing:'0.05em', whiteSpace:'nowrap' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((s: any, i: number) => (
-                <tr key={i} style={{ borderBottom:'1px solid var(--border)' }}>
-                  <td style={{ padding:'10px 10px', maxWidth:220, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    <span title={s.issue || s.id}>{s.issue || s.id || '—'}</span>
-                  </td>
-                  <td style={{ padding:'10px', color:'var(--muted)', whiteSpace:'nowrap' }}>
-                    {s.started_at ? new Date(s.started_at).toLocaleString() : '—'}
-                  </td>
-                  <td style={{ padding:'10px', color:'var(--muted)', whiteSpace:'nowrap' }}>
-                    {s.duration_s != null ? `${Math.round(s.duration_s)}s` : '—'}
-                  </td>
-                  <td style={{ padding:'10px', color:'var(--muted)', whiteSpace:'nowrap', fontSize:11 }}>
-                    {s.model || '—'}
-                  </td>
-                  <td style={{ padding:'10px', whiteSpace:'nowrap' }}>
-                    {s.cost_usd != null ? `$${Number(s.cost_usd).toFixed(4)}` : '—'}
-                  </td>
-                  <td style={{ padding:'10px' }}>
-                    <span className={`badge badge-${s.status === 'done' ? 'green' : s.status === 'error' ? 'red' : 'info'}`}>
-                      {s.status || 'unknown'}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      )}
+
+      {pipelineId && (
+        <>
+          {/* Stats row */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, marginBottom: 20 }}>
+            <StatCard icon={Activity} label="Total Sessions" value={summary?.total ?? '—'} />
+            <StatCard
+              icon={CheckCircle2} label="Success Rate"
+              value={summary ? `${summary.success_rate}%` : '—'}
+              sub={summary ? `${summary.succeeded} ok / ${summary.failed} fail` : undefined}
+              color={!summary ? 'var(--muted)' : summary.success_rate >= 80 ? 'var(--green)' : 'var(--red)'}
+            />
+            <StatCard icon={DollarSign} label="Total Cost" value={fmtCost(summary?.total_cost_usd)} />
+            <StatCard icon={DollarSign} label="Avg Cost / Session" value={fmtCost(summary?.avg_cost_usd)} color="var(--muted)" />
+            <StatCard icon={Clock} label="Avg Duration" value={fmtDur(summary?.avg_duration_s)} color="var(--muted)" />
+            {summary?.total_tokens_output > 0 && (
+              <StatCard icon={Cpu} label="Output Tokens" value={fmtTokens(summary?.total_tokens_output)}
+                sub={summary?.total_tokens_input ? `↓${fmtTokens(summary.total_tokens_input)} in` : undefined}
+                color="#6366f1" />
+            )}
+            {summary?.total_cache_read > 0 && (
+              <StatCard icon={Zap} label="Cache Hits" value={fmtTokens(summary?.total_cache_read)}
+                sub="tokens served from cache" color="var(--green)" />
+            )}
+            {summary?.total_nano_aiu > 0 && (
+              <StatCard icon={DollarSign} label="Total AIU" value={fmtNanoAiu(summary?.total_nano_aiu)}
+                sub={summary?.total_premium_requests ? `${summary.total_premium_requests} premium req` : undefined}
+                color="var(--muted)" />
+            )}
+          </div>
+
+          {/* Breakdown */}
+          {(stageItems.length > 0 || modelItems.length > 0) && (
+            <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
+              <BreakdownList title="By Stage" items={stageItems} maxCost={maxStageCost} />
+              <BreakdownList title="By Model" items={modelItems} maxCost={maxModelCost} />
+            </div>
+          )}
+
+          {/* Session log */}
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--muted)', marginBottom: 10 }}>
+            Session Log
+          </div>
+
+          {loading && sessions.length === 0 ? (
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--muted)', padding: 32 }}>
+              <div className="spinner" /> Loading…
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="card" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--muted)' }}>
+              <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+              No sessions in this time range.<br />
+              <span style={{ fontSize: 12 }}>Start a pipeline run to see Copilot sessions appear here.</span>
+            </div>
+          ) : (
+            <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                    {['Issue', 'Title', 'Stage', 'Status', 'Started', 'Duration', 'Model', 'Cost', 'Tokens ↑', 'Cache ⚡', 'AIU'].map(h => (
+                      <th key={h} style={{
+                        padding: '9px 12px', textAlign: 'left', color: 'var(--muted)',
+                        fontWeight: 600, fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em',
+                        whiteSpace: 'nowrap', background: 'var(--card)',
+                      }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((s: any, i: number) => (
+                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}
+                      title={s.error_message ? `Error: ${s.error_message}` : undefined}>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--muted)' }}>
+                        {s.issue_repo ? `${s.issue_repo.split('/').pop()}#${s.issue_number}` : `#${s.issue_number ?? '—'}`}
+                      </td>
+                      <td style={{ padding: '8px 12px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {s.issue_title || '—'}
+                      </td>
+                      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                        <span style={{
+                          background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                          color: 'var(--accent)', borderRadius: 4, padding: '2px 7px', fontSize: 11, fontWeight: 600,
+                        }}>{s.stage || '—'}</span>
+                      </td>
+                      <td style={{ padding: '8px 12px', whiteSpace: 'nowrap' }}>
+                        <StatusBadge status={s.status || 'unknown'} />
+                      </td>
+                      <td style={{ padding: '8px 12px', color: 'var(--muted)', whiteSpace: 'nowrap' }}
+                        title={s.started_at || undefined}>
+                        {fmtTime(s.started_at)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap' }}>
+                        {fmtDur(s.duration_s)}
+                      </td>
+                      <td style={{ padding: '8px 12px', color: 'var(--muted)', fontSize: 11, whiteSpace: 'nowrap' }}>
+                        {s.model || '—'}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap',
+                        color: s.cost_usd ? 'var(--fg)' : 'var(--muted)' }}>
+                        {fmtCost(s.cost_usd)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--muted)', fontSize: 11 }}
+                        title={`Input: ${s.tokens_input ?? '—'}, Output: ${s.tokens_output ?? '—'}`}>
+                        {fmtTokens(s.tokens_output)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--green)', fontSize: 11 }}
+                        title="Cache-read tokens (billed at lower rate)">
+                        {fmtTokens(s.tokens_cache_read)}
+                      </td>
+                      <td style={{ padding: '8px 12px', fontFamily: 'monospace', whiteSpace: 'nowrap', color: 'var(--muted)', fontSize: 11 }}
+                        title="GitHub Copilot nano AI Units">
+                        {fmtNanoAiu(s.nano_aiu)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

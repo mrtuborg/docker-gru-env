@@ -36,6 +36,7 @@ from ..config import (
     get_pipeline_state, set_pipeline_state, clear_pipeline_state,
     get_agent,
 )
+from ..connectors.analytics_connector import IAnalyticsStore
 from ..vault import load_secret
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,20 @@ def _gh_host_for(plugin_id: str) -> str:
     return os.environ.get("GH_HOST", "github.com")
 
 
+def _analytics_store_for(analytics_id: str) -> IAnalyticsStore | None:
+    """Look up the analytics connector by ID and return it as IAnalyticsStore, or None."""
+    if not analytics_id:
+        return None
+    try:
+        from ..app import connector_manager
+        if connector_manager:
+            conn = connector_manager.get(analytics_id)
+            if isinstance(conn, IAnalyticsStore):
+                return conn
+    except Exception:
+        pass
+    return None
+
 # ── Data types ────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -63,6 +78,12 @@ class BoardIssue:
     repo: str
     stage: str
     title: str = ""
+    labels: list = None  # type: ignore[assignment]
+    updated_at: str = ""
+
+    def __post_init__(self):
+        if self.labels is None:
+            self.labels = []
 
 
 @dataclass
@@ -73,6 +94,8 @@ class SessionResult:
     new_stage: str = ""
     timed_out: bool = False
     session_id: str = ""
+    shutdown_data: dict = field(default_factory=dict)   # full session.shutdown event data
+    output_lines: list = field(default_factory=list)    # raw CLI output for log storage
 
 
 @dataclass
@@ -219,6 +242,13 @@ class PipelineEngine:
         run_id = f"run-{uuid.uuid4().hex[:8]}"
         await create_pipeline_run(pid, run_id)
 
+        # Resolve analytics store via IAnalyticsStore interface
+        store: IAnalyticsStore | None = _analytics_store_for(
+            pipeline.get("analytics_connector_id", "")
+        )
+        if store:
+            await store.create_run(pid, run_id)
+
         stages = pipeline.get("stages", [])
         ai_stages = [s for s in stages if s.get("actor") == "ai"]
         if not ai_stages:
@@ -266,7 +296,8 @@ class PipelineEngine:
 
         # Publish initial queue (actionable issues not yet active)
         def _as_dict(iss: BoardIssue) -> dict:
-            return {"number": iss.number, "repo": iss.repo, "stage": iss.stage, "title": iss.title}
+            return {"number": iss.number, "repo": iss.repo, "stage": iss.stage,
+                    "title": iss.title, "labels": iss.labels, "updated_at": iss.updated_at}
 
         actionable = [
             iss for iss in issues
@@ -334,6 +365,21 @@ class PipelineEngine:
             else:
                 prompt = self._render_prompt(stage_cfg, issue, pipeline)
 
+            # Pre-check declared skill dependencies
+            if agent_data and agent_data.get("skills"):
+                working_dir = pipeline.get("working_dir", "") or ""
+                missing = []
+                for skill_path in agent_data["skills"]:
+                    full = Path(working_dir) / skill_path if working_dir else Path(skill_path)
+                    if not full.exists():
+                        missing.append(skill_path)
+                if missing:
+                    self._emit(pid, "warning",
+                        f"⚠ #{issue.number}: agent '{agent_id}' requires missing skills: {', '.join(missing)}. "
+                        f"Ensure working_dir is set and the skills/ directory is mounted.",
+                        issue=issue.number, stage=issue.stage,
+                    )
+
             # Write agent file if using custom agent
             if agent_data:
                 self._write_agent_file(agent_data)
@@ -343,14 +389,30 @@ class PipelineEngine:
             result = await self._run_session(
                 pipeline, issue, prompt, current_model,
                 agent_name=agent_id if agent_data else "",
+                token=token,
             )
             ended_at = datetime.now(timezone.utc).isoformat()
 
-            # Check stage progression
-            if result.exit_code == 0 and not result.timed_out:
-                result = await self._check_progression(
-                    pipeline, issue, token, result,
-                )
+            # Move issue on board based on on_success / on_failure stage config
+            on_success_col = stage_cfg.get("on_success", "") or ""
+            on_failure_col = stage_cfg.get("on_failure", "") or ""
+            on_failure_label = stage_cfg.get("on_failure_label", "") or ""
+
+            if result.exit_code == 0 and not result.timed_out and on_success_col:
+                moved = await self._move_issue(pipeline, issue, on_success_col, token)
+                if moved:
+                    result.stage_changed = True
+                    result.new_stage = on_success_col
+                else:
+                    result.exit_code = 1  # move failed → treat as failure
+            elif (result.exit_code != 0 or result.timed_out):
+                if on_failure_label:
+                    await self._add_label_to_issue(pipeline, issue, on_failure_label, token)
+                if on_failure_col:
+                    await self._move_issue(pipeline, issue, on_failure_col, token)
+            elif result.exit_code == 0 and not result.timed_out and not on_success_col:
+                # No on_success configured — fall back to polling GitHub for progression
+                result = await self._check_progression(pipeline, issue, token, result)
 
             # Update state
             attempt_count = st.get("attempt_count", 0) + 1
@@ -381,10 +443,11 @@ class PipelineEngine:
                     self._emit(pid, "warn",
                         f"3 consecutive failures — switching to {model_list[current_model_idx]}")
 
-            # Record run item
-            await add_pipeline_run_item(run_id, {
+            # Record run item — SQLite (legacy) + analytics store via IAnalyticsStore
+            item = {
                 "issue_number": issue.number,
                 "issue_repo": issue.repo,
+                "issue_title": issue.title,
                 "stage": issue.stage,
                 "status": "success" if (result.exit_code == 0 and result.stage_changed) else
                           "timeout" if result.timed_out else "failure",
@@ -393,11 +456,18 @@ class PipelineEngine:
                 "duration_s": result.duration_s,
                 "model": current_model or None,
                 "session_id": result.session_id or None,
-            })
+            }
+            await add_pipeline_run_item(run_id, item)  # SQLite (legacy)
+            if store:
+                await store.write_run_item(run_id, item, result.shutdown_data)
+                await store.write_session_logs(
+                    run_id, issue.number, issue.stage, result.output_lines
+                )
 
-        await finish_pipeline_run(run_id, "completed", {
-            **counts, "model": model_list[current_model_idx] if model_list else None,
-        })
+        final_counts = {**counts, "model": model_list[current_model_idx] if model_list else None}
+        await finish_pipeline_run(run_id, "completed", final_counts)
+        if store:
+            await store.finish_run(run_id, "completed", final_counts)
         self._emit(pid, "info",
             f"Pass complete: {counts['succeeded']} succeeded, "
             f"{counts['failed']} failed, {counts['skipped']} skipped")
@@ -433,7 +503,7 @@ class PipelineEngine:
                 nodes {
                   content {
                     ... on Issue {
-                      number title state
+                      number title state updatedAt
                       repository { nameWithOwner }
                       labels(first: 10) { nodes { name } }
                     }
@@ -508,6 +578,8 @@ class PipelineEngine:
                             repo=repo,
                             stage=stage,
                             title=content.get("title", ""),
+                            labels=labels,
+                            updated_at=content.get("updatedAt", ""),
                         ))
 
                 page_info = items_data.get("pageInfo", {})
@@ -600,39 +672,111 @@ class PipelineEngine:
         agent_file = agents_dir / f"{agent_data['id']}.agent.md"
         agent_file.write_text(content)
 
+    # ── Session shutdown reader ────────────────────────────────────────────────
+
+    def _read_session_shutdown(self, proc_wall_start: float) -> tuple[str, dict]:
+        """Find the Copilot CLI session created after proc_wall_start.
+
+        Scans ~/.copilot/session-state/ for directories whose mtime post-dates
+        the subprocess start, reads events.jsonl, and returns
+        (session_id, shutdown_data) for the most recent matching session.
+        Returns ("", {}) if nothing is found.
+        """
+        session_root = Path.home() / ".copilot" / "session-state"
+        if not session_root.exists():
+            return "", {}
+
+        candidates: list[tuple[float, Path]] = []
+        try:
+            for d in session_root.iterdir():
+                if not d.is_dir():
+                    continue
+                try:
+                    mtime = d.stat().st_mtime
+                    if mtime >= proc_wall_start:
+                        candidates.append((mtime, d))
+                except OSError:
+                    pass
+        except OSError:
+            return "", {}
+
+        candidates.sort(reverse=True)  # newest first
+        for _, session_dir in candidates:
+            events_file = session_dir / "events.jsonl"
+            if not events_file.exists():
+                continue
+            try:
+                with events_file.open() as f:
+                    for line in f:
+                        try:
+                            ev = json.loads(line)
+                            if ev.get("type") == "session.shutdown":
+                                return session_dir.name, ev.get("data", {})
+                        except json.JSONDecodeError:
+                            pass
+            except OSError:
+                pass
+
+        return "", {}
+
     # ── Session execution ─────────────────────────────────────────────────────
 
     async def _run_session(
         self, pipeline: dict, issue: BoardIssue, prompt: str, model: str,
-        agent_name: str = "",
+        agent_name: str = "", token: str = "",
     ) -> SessionResult:
         """Execute a Copilot session as a subprocess."""
         timeout_hours = pipeline.get("session_timeout_hours", 4.0)
         timeout_secs = int(timeout_hours * 3600)
         plugin_id = pipeline.get("plugin_id", "")
         gh_host = _gh_host_for(plugin_id)
+        working_dir = pipeline.get("working_dir") or None
 
-        cmd = ["timeout", str(timeout_secs), "gh", "copilot", "--"]
+        cmd = ["timeout", str(timeout_secs), "copilot"]
         if model:
             cmd.extend(["--model", model])
         if agent_name:
             cmd.extend(["--agent", agent_name])
+        # --yolo = --allow-all-tools --allow-all-paths --allow-all-urls
+        # --no-ask-user disables the ask_user tool so agent works autonomously
         cmd.extend(["-p", prompt, "--yolo", "--no-ask-user"])
 
+        # GH_HOST directs gh/copilot to the right GHE instance.
+        # Do NOT set GH_TOKEN here: copilot CLI rejects classic PATs (ghp_) and
+        # the container already has working Copilot auth via cached credentials.
+        # The vault token is still available to gh subprocesses via GH_VAULT_TOKEN
+        # if skills/agents need it explicitly.
         env = {**os.environ, "GH_HOST": gh_host}
+        if token:
+            env["GH_VAULT_TOKEN"] = token  # available to skill scripts, not copilot itself
 
         start = time.monotonic()
+        wall_start = time.time()  # for locating the session-state directory
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.STDOUT,
                 env=env,
+                cwd=working_dir,
             )
-            stdout, _ = await proc.communicate()
+
+            # Stream output line-by-line so the Boards page can show live thoughts
+            _ansi = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
+            output_lines: list[str] = []
+            async for raw in proc.stdout:  # type: ignore[union-attr]
+                line = _ansi.sub('', raw.decode(errors='replace')).rstrip()
+                if line.strip():
+                    output_lines.append(line)
+                    self._emit(
+                        pipeline["id"], "session_log", line,
+                        issue=issue.number, stage=pipeline.get("current_stage", ""),
+                    )
+
+            await proc.wait()
             exit_code = proc.returncode or 0
         except FileNotFoundError:
-            self._emit(pipeline["id"], "error", "gh CLI not found — is GitHub CLI installed?")
+            self._emit(pipeline["id"], "error", "copilot CLI not found — ensure the Copilot CLI is installed in the container")
             return SessionResult(exit_code=127, duration_s=time.monotonic() - start)
         except Exception as e:
             self._emit(pipeline["id"], "error", f"Session subprocess error: {e}")
@@ -641,13 +785,183 @@ class PipelineEngine:
         duration = time.monotonic() - start
         timed_out = exit_code == 124
 
+        output_text = "\n".join(output_lines)
+        if exit_code != 0 and not timed_out:
+            # Log first 500 chars of output to help diagnose failures
+            preview = output_text[:500].strip()
+            if preview:
+                self._emit(pipeline["id"], "error",
+                    f"Session exited {exit_code}: {preview[:200]}")
+
+        # Read session.shutdown from events.jsonl for token/cost data
+        session_id, shutdown_data = self._read_session_shutdown(wall_start)
+        if shutdown_data:
+            model_used = shutdown_data.get("currentModel", "")
+            nano_aiu = shutdown_data.get("totalNanoAiu", 0)
+            self._emit(
+                pipeline["id"], "info",
+                f"Session closed: {model_used}, "
+                f"{shutdown_data.get('totalPremiumRequests', 0)} premium req, "
+                f"{nano_aiu // 1_000_000} µAIU",
+                issue=issue.number, stage=pipeline.get("current_stage", ""),
+            )
+
         return SessionResult(
             exit_code=exit_code,
             duration_s=round(duration, 1),
             timed_out=timed_out,
+            session_id=session_id,
+            shutdown_data=shutdown_data,
+            output_lines=output_lines,
         )
 
-    # ── Progression detection ─────────────────────────────────────────────────
+    # ── Board move ────────────────────────────────────────────────────────────
+
+    async def _move_issue(
+        self, pipeline: dict, issue: BoardIssue, target_column: str, token: str,
+    ) -> bool:
+        """Move issue to target_column on the GitHub project board via GraphQL.
+        Returns True on success, False on failure."""
+        gh_host = _gh_host_for(pipeline.get("plugin_id", ""))
+        gql_url = (
+            f"https://{gh_host}/api/graphql"
+            if gh_host != "github.com"
+            else "https://api.github.com/graphql"
+        )
+        headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+        project_owner = pipeline.get("project_owner", "")
+        project_number = pipeline.get("project_number", 0)
+        owner, repo_name = issue.repo.split("/", 1) if "/" in issue.repo else (issue.repo, "")
+
+        try:
+            async with httpx.AsyncClient(timeout=20) as client:
+                # Step 1: get project item ID and Status field/option IDs
+                q = """
+                {
+                  repository(owner: "%s", name: "%s") {
+                    issue(number: %d) { id projectItems(first: 20) {
+                      nodes { id project { number }
+                        fieldValues(first: 20) { nodes {
+                          ... on ProjectV2ItemFieldSingleSelectValue {
+                            name field { ... on ProjectV2SingleSelectField { name } }
+                          }
+                        }}
+                      }
+                    }}
+                  }
+                  organization(login: "%s") {
+                    projectV2(number: %d) {
+                      id
+                      field(name: "Status") {
+                        ... on ProjectV2SingleSelectField {
+                          id options { id name }
+                        }
+                      }
+                    }
+                  }
+                }
+                """ % (owner, repo_name, issue.number, project_owner, project_number)
+
+                resp = await client.post(gql_url, headers=headers, json={"query": q})
+                data = resp.json()
+
+                if "errors" in data:
+                    logger.warning("_move_issue GQL query error for #%d: %s", issue.number, data["errors"])
+                    return False
+
+                # Extract project item ID for this issue
+                project_items = (data.get("data", {}).get("repository", {})
+                                 .get("issue", {}).get("projectItems", {}).get("nodes", []))
+                item_id = None
+                for pi in project_items:
+                    if pi.get("project", {}).get("number") == project_number:
+                        item_id = pi["id"]
+                        break
+
+                if not item_id:
+                    logger.warning("_move_issue: issue #%d not found in project %d", issue.number, project_number)
+                    return False
+
+                # Extract project ID and Status field option ID for target column
+                proj = (data.get("data", {}).get("organization", {}).get("projectV2", {}))
+                project_id = proj.get("id")
+                status_field = proj.get("field", {})
+                field_id = status_field.get("id")
+                option_id = None
+                for opt in status_field.get("options", []):
+                    if opt["name"].strip().lower() == target_column.strip().lower():
+                        option_id = opt["id"]
+                        break
+
+                if not project_id or not field_id or not option_id:
+                    logger.warning(
+                        "_move_issue: could not resolve project/field/option for column '%s' "
+                        "(project_id=%s, field_id=%s, option_id=%s)",
+                        target_column, project_id, field_id, option_id,
+                    )
+                    return False
+
+                # Step 2: move the item
+                mutation = """
+                mutation {
+                  updateProjectV2ItemFieldValue(input: {
+                    projectId: "%s"
+                    itemId: "%s"
+                    fieldId: "%s"
+                    value: { singleSelectOptionId: "%s" }
+                  }) { projectV2Item { id } }
+                }
+                """ % (project_id, item_id, field_id, option_id)
+
+                resp2 = await client.post(gql_url, headers=headers, json={"query": mutation})
+                data2 = resp2.json()
+                if "errors" in data2:
+                    logger.warning("_move_issue mutation error for #%d: %s", issue.number, data2["errors"])
+                    return False
+
+                self._emit(pipeline["id"], "info",
+                    f"Moved #{issue.number} → {target_column}",
+                    issue=issue.number, stage=issue.stage)
+                return True
+
+        except Exception as e:
+            logger.warning("_move_issue failed for #%d: %s", issue.number, e)
+            return False
+
+    # ── Label helper ──────────────────────────────────────────────────────────
+
+    async def _add_label_to_issue(
+        self, pipeline: dict, issue: "BoardIssue", label: str, token: str,
+    ) -> bool:
+        """Add a label to the issue via the REST API. Creates the label if missing."""
+        gh_host = _gh_host_for(pipeline.get("plugin_id", ""))
+        api_base = (
+            f"https://{gh_host}/api/v3"
+            if gh_host != "github.com"
+            else "https://api.github.com"
+        )
+        owner, repo_name = issue.repo.split("/", 1) if "/" in issue.repo else (issue.repo, "")
+        headers = {
+            "Authorization": f"token {token}",
+            "Accept": "application/vnd.github+json",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                url = f"{api_base}/repos/{owner}/{repo_name}/issues/{issue.number}/labels"
+                resp = await client.post(url, headers=headers, json={"labels": [label]})
+                if resp.status_code in (200, 201):
+                    self._emit(pipeline["id"], "info",
+                        f"Labelled #{issue.number} → {label}",
+                        issue=issue.number, stage=issue.stage)
+                    return True
+                logger.warning("_add_label failed %d for #%d: %s",
+                               resp.status_code, issue.number, resp.text[:200])
+                return False
+        except Exception as e:
+            logger.warning("_add_label failed for #%d: %s", issue.number, e)
+            return False
+
+    # ── Progression detection (fallback when on_success not configured) ────────
 
     async def _check_progression(
         self, pipeline: dict, issue: BoardIssue, token: str, result: SessionResult,

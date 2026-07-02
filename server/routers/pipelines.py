@@ -19,8 +19,20 @@ from ..config import (
     list_pipeline_runs, get_pipeline_run_items,
     clear_pipeline_state, get_pipeline_state,
 )
+from ..connectors.analytics_connector import IAnalyticsStore
 from ..models.pipeline import PipelineCreate, PipelineUpdate
 from ..vault import load_secret
+
+
+def _get_analytics_store(request: Request, pipeline: dict) -> IAnalyticsStore | None:
+    """Return the IAnalyticsStore for a pipeline, or None if not configured."""
+    analytics_id = pipeline.get("analytics_connector_id", "")
+    if not analytics_id:
+        return None
+    conn = request.app.state.connectors.get(analytics_id)
+    if isinstance(conn, IAnalyticsStore):
+        return conn
+    return None
 
 router = APIRouter()
 
@@ -68,32 +80,45 @@ async def import_pipeline(body: ImportRequest):
     if existing:
         raise HTTPException(409, f"Pipeline '{pid}' already exists")
 
-    # Build stages from stage_order
-    stage_order = cfg.get("stage_order", [])
-    queue_stages = set(cfg.get("queue_stages", []))
-    prompts_dir = Path(body.prompts_dir) if body.prompts_dir else None
-
+    # Build stages — support both new `stages` array and legacy `stage_order` list
     stages = []
-    # Collect all known columns: stage_order columns are AI, others are human
-    for col_name in stage_order:
-        prompt = ""
-        if prompts_dir:
-            # Try exact match, then with spaces replaced
-            for candidate in [col_name, col_name.replace(" ", "_")]:
-                prompt_file = prompts_dir / f"{candidate}.md"
-                if prompt_file.exists():
-                    prompt = prompt_file.read_text()
-                    break
-        stages.append({
-            "column": col_name,
-            "actor": "ai",
-            "prompt": prompt,
-        })
-
-    # Add human gate stages that aren't in stage_order but are common
-    for human_col in ["Backlog", "Review", "Done"]:
-        if human_col not in stage_order and human_col not in [s["column"] for s in stages]:
-            stages.append({"column": human_col, "actor": "human"})
+    if cfg.get("stages") and isinstance(cfg["stages"], list):
+        # New format: stages array with column/actor/prompt/etc
+        for s in cfg["stages"]:
+            if not isinstance(s, dict):
+                continue
+            stages.append({
+                "column": s.get("column", ""),
+                "actor": s.get("actor", "ai"),
+                "agent_id": s.get("agent_id", ""),
+                "task_prompt": s.get("task_prompt", ""),
+                "prompt": s.get("prompt", ""),
+                "on_success": s.get("on_success", ""),
+                "on_failure": s.get("on_failure", ""),
+                "on_timeout": s.get("on_timeout", ""),
+                "env": s.get("env", {}),
+            })
+    else:
+        # Legacy format: stage_order list of column names
+        stage_order = cfg.get("stage_order", [])
+        prompts_dir = Path(body.prompts_dir) if body.prompts_dir else None
+        for col_name in stage_order:
+            prompt = ""
+            if prompts_dir:
+                for candidate in [col_name, col_name.replace(" ", "_")]:
+                    prompt_file = prompts_dir / f"{candidate}.md"
+                    if prompt_file.exists():
+                        prompt = prompt_file.read_text()
+                        break
+            stages.append({
+                "column": col_name,
+                "actor": "ai",
+                "prompt": prompt,
+            })
+        # Add human gate stages that aren't in stage_order but are common
+        for human_col in ["Backlog", "Review", "Done"]:
+            if human_col not in stage_order and human_col not in [s["column"] for s in stages]:
+                stages.append({"column": human_col, "actor": "human"})
 
     # Build models list
     models = []
@@ -154,10 +179,10 @@ async def update(pipeline_id: str, body: PipelineUpdate):
     merged = {**existing}
     for k, v in body.model_dump(exclude_unset=True).items():
         merged[k] = v
-    # Ensure stages are dicts (from Pydantic models)
+    # Normalize stages: DB returns column_name, upsert expects column
     if "stages" in merged and merged["stages"]:
         merged["stages"] = [
-            s.model_dump() if hasattr(s, "model_dump") else s
+            _fix_stage_keys(s.model_dump() if hasattr(s, "model_dump") else s)
             for s in merged["stages"]
         ]
     await upsert_pipeline(merged)
@@ -174,16 +199,26 @@ async def remove(pipeline_id: str):
 
 # ── Control ───────────────────────────────────────────────────────────────────
 
+def _fix_stage_keys(stage: dict) -> dict:
+    """get_pipeline() returns stages with 'column_name'; upsert_pipeline() needs 'column'."""
+    if "column_name" in stage and "column" not in stage:
+        return {**stage, "column": stage["column_name"]}
+    return stage
+
+
 @router.post("/{pipeline_id}/start")
 async def start_pipeline(pipeline_id: str, request: Request):
     p = await get_pipeline(pipeline_id)
     if not p:
         raise HTTPException(404, "Pipeline not found")
+    # Write enabled=True BEFORE starting the engine so the watcher loop
+    # sees it immediately when it calls get_pipeline() on its first tick.
+    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
+    await upsert_pipeline({**p, "enabled": True})
     engine = request.app.state.engine
     started = await engine.start(pipeline_id)
     if not started:
         return {"status": "already_running", "pipeline_id": pipeline_id}
-    await upsert_pipeline({**p, "enabled": True})
     return {"status": "started", "pipeline_id": pipeline_id}
 
 
@@ -194,6 +229,7 @@ async def stop_pipeline(pipeline_id: str, request: Request):
         raise HTTPException(404, "Pipeline not found")
     engine = request.app.state.engine
     await engine.stop(pipeline_id)
+    p["stages"] = [_fix_stage_keys(s) for s in p.get("stages", [])]
     await upsert_pipeline({**p, "enabled": False})
     return {"status": "stopped", "pipeline_id": pipeline_id}
 
@@ -223,6 +259,53 @@ async def get_run_items(pipeline_id: str, run_id: str):
     return await get_pipeline_run_items(run_id)
 
 
+@router.get("/{pipeline_id}/sessions")
+async def get_sessions(pipeline_id: str, days: int = 7, request: Request = None):
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return {"summary": {}, "sessions": [], "analytics_unavailable": True}
+    return await store.read_sessions(pipeline_id, days)
+
+
+@router.get("/{pipeline_id}/issues/{issue_number}/history")
+async def get_issue_history(pipeline_id: str, issue_number: int, request: Request = None):
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return []
+    return await store.read_issue_history(pipeline_id, issue_number)
+
+
+@router.get("/{pipeline_id}/issues/{issue_number}/session-logs")
+async def get_issue_session_logs(
+    pipeline_id: str, issue_number: int,
+    run_id: str = "", stage: str = "",
+    request: Request = None,
+):
+    """Return stored Copilot CLI log lines. Defaults to the most recent run."""
+    p = await get_pipeline(pipeline_id)
+    if not p:
+        raise HTTPException(404, "Pipeline not found")
+    store = _get_analytics_store(request, p)
+    if store is None:
+        return []
+
+    if not run_id:
+        history = await store.read_issue_history(pipeline_id, issue_number)
+        if not history:
+            return []
+        run_id = history[0]["run_id"]
+        if not stage:
+            stage = history[0]["stage"]
+
+    return await store.read_session_logs(run_id, issue_number, stage or None)
+
+
 @router.get("/{pipeline_id}/state")
 async def get_state(pipeline_id: str):
     p = await get_pipeline(pipeline_id)
@@ -246,8 +329,9 @@ async def get_status(pipeline_id: str, request: Request):
     live = engine.live_state(pipeline_id)
     queued = live["queued"]
 
-    # When engine is stopped/paused, still fetch from GitHub so Boards shows current state
-    if not queued and engine.status(pipeline_id) in ("stopped", "paused"):
+    # When engine has no live queue (stopped, paused, or sleeping between polls),
+    # fall back to a fresh GitHub query so Boards always shows current board state.
+    if not queued and not live["active"]:
         try:
             from ..vault import load_secret  # noqa: PLC0415
             plugin_id = p.get("plugin_id", "")
@@ -256,17 +340,42 @@ async def get_status(pipeline_id: str, request: Request):
                 issues = await engine._query_board(p, token)
                 stages = {s.get("column") or s.get("column_name", "") for s in (p.get("stages") or [])}
                 queued = [
-                    {"number": i.number, "repo": i.repo, "stage": i.stage, "title": i.title}
+                    {"number": i.number, "repo": i.repo, "stage": i.stage,
+                     "title": i.title, "labels": i.labels, "updated_at": i.updated_at}
                     for i in issues if i.stage in stages
                 ]
         except Exception:
             pass  # best-effort; don't fail the endpoint
 
+    # ── Classifier config: pipeline exposes its human-stage rules ────────────
+    # This is the contract between Pipeline and Board — board uses these rules
+    # to classify issues without knowing pipeline internals.
+    human_stages = [
+        s.get("column") or s.get("column_name", "")
+        for s in (p.get("stages") or [])
+        if s.get("actor", "ai") == "human"
+    ]
+    # Well-known human-signal labels; pipeline owner can extend via stage config
+    human_labels = ["human-only", "needs-human", "needs-review", "watcher-needs-human"]
+
     recent = await list_pipeline_runs(pipeline_id, limit=20)
     recent_items: list[dict] = []
-    for run in recent[:5]:
+    active_key = None
+    if live["active"]:
+        a = live["active"]
+        active_key = (a.get("number"), a.get("repo"), a.get("stage"))
+    seen_issues: set[tuple] = set()
+    for run in recent[:10]:
         items = await get_pipeline_run_items(run["id"])
         for item in items:
+            # Don't show the currently-active issue in recently processed
+            if active_key and (item["issue_number"], item["issue_repo"], item["stage"]) == active_key:
+                continue
+            # Deduplicate: one entry per issue (keep first/most recent occurrence)
+            dedup_key = (item["issue_number"], item["issue_repo"])
+            if dedup_key in seen_issues:
+                continue
+            seen_issues.add(dedup_key)
             recent_items.append({**item, "run_id": run["id"]})
     return {
         "pipeline_id": pipeline_id,
@@ -274,6 +383,10 @@ async def get_status(pipeline_id: str, request: Request):
         "active": live["active"],
         "queued": queued,
         "recent": recent_items[:20],
+        "classifier": {
+            "human_stages": [s for s in human_stages if s],
+            "human_labels": human_labels,
+        },
     }
 
 

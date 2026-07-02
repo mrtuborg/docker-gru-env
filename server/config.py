@@ -76,7 +76,9 @@ CREATE TABLE IF NOT EXISTS agents (
     repo_ref        TEXT DEFAULT 'main',
     model           TEXT DEFAULT '',
     tools_json      TEXT DEFAULT '[]',
+    skills_json     TEXT DEFAULT '[]',
     mcp_servers_json TEXT DEFAULT '{}',
+    is_orchestrator  INTEGER NOT NULL DEFAULT 0,
     created_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at      TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -99,6 +101,8 @@ CREATE TABLE IF NOT EXISTS pipelines (
     models_json           TEXT DEFAULT '[]',
     allowed_repos_json    TEXT DEFAULT '[]',
     findings_json         TEXT,
+    working_dir           TEXT,
+    orchestrator_agent_id TEXT DEFAULT '',
     created_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     updated_at            TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
@@ -113,6 +117,7 @@ CREATE TABLE IF NOT EXISTS pipeline_stages (
     prompt      TEXT DEFAULT '',
     on_success  TEXT DEFAULT '',
     on_failure  TEXT DEFAULT '',
+    on_failure_label TEXT DEFAULT '',
     on_timeout  TEXT DEFAULT '',
     env_json    TEXT DEFAULT '{}',
     PRIMARY KEY (pipeline_id, column_name),
@@ -137,6 +142,7 @@ CREATE TABLE IF NOT EXISTS pipeline_run_items (
     run_id        TEXT NOT NULL,
     issue_number  INTEGER NOT NULL,
     issue_repo    TEXT NOT NULL,
+    issue_title   TEXT,
     stage         TEXT NOT NULL,
     status        TEXT NOT NULL,
     started_at    TEXT,
@@ -158,6 +164,16 @@ CREATE TABLE IF NOT EXISTS pipeline_state (
     PRIMARY KEY (pipeline_id, issue_key),
     FOREIGN KEY (pipeline_id) REFERENCES pipelines(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS quick_actions (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    action_type TEXT NOT NULL DEFAULT 'create_issue',
+    pipeline_id TEXT NOT NULL DEFAULT '',
+    config_json TEXT NOT NULL DEFAULT '{}',
+    created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+);
 """
 
 
@@ -174,6 +190,21 @@ async def init_db() -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(db_path) as db:
         await db.executescript(DDL)
+        # Migrations: safe to run repeatedly; ignore if column already exists
+        migrations = [
+            "ALTER TABLE pipelines ADD COLUMN working_dir TEXT",
+            "ALTER TABLE agents ADD COLUMN skills_json TEXT DEFAULT '[]'",
+            "ALTER TABLE agents ADD COLUMN is_orchestrator INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE pipelines ADD COLUMN orchestrator_agent_id TEXT DEFAULT ''",
+            "ALTER TABLE pipeline_run_items ADD COLUMN issue_title TEXT",
+            "ALTER TABLE pipeline_stages ADD COLUMN on_failure_label TEXT DEFAULT ''",
+            "ALTER TABLE pipelines ADD COLUMN analytics_connector_id TEXT DEFAULT ''",
+        ]
+        for stmt in migrations:
+            try:
+                await db.execute(stmt)
+            except Exception:
+                pass  # column already exists
         await db.commit()
     logger.info("Config DB initialized at %s", db_path)
 
@@ -203,6 +234,19 @@ async def get_all_settings() -> dict[str, str]:
 
 # ── Agent CRUD ────────────────────────────────────────────────────────────────
 
+_SKILL_REF_RE = re.compile(r'bash\s+(skills/[\w/.-]+\.sh)')
+
+def _agent_lint(agent: dict) -> list[str]:
+    """Compute lint errors: skill refs in prompt not declared in agent.skills."""
+    import re as _re
+    md = agent.get("agent_md", "")
+    declared = set(agent.get("skills", []))
+    refs = set(_SKILL_REF_RE.findall(md))
+    undeclared = sorted(refs - declared)
+    errors = [f"Undeclared skill: {s}" for s in undeclared]
+    return errors
+
+
 async def list_agents() -> list[dict]:
     async with aiosqlite.connect(get_db_path()) as db:
         db.row_factory = aiosqlite.Row
@@ -212,7 +256,10 @@ async def list_agents() -> list[dict]:
             for r in rows:
                 d = dict(r)
                 d["tools"] = json.loads(d.pop("tools_json", "[]"))
+                d["skills"] = json.loads(d.pop("skills_json", "[]"))
                 d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+                d["is_orchestrator"] = bool(d.get("is_orchestrator", 0))
+                d["lint_errors"] = _agent_lint(d)
                 result.append(d)
             return result
 
@@ -226,7 +273,10 @@ async def get_agent(agent_id: str) -> dict | None:
                 return None
             d = dict(row)
             d["tools"] = json.loads(d.pop("tools_json", "[]"))
+            d["skills"] = json.loads(d.pop("skills_json", "[]"))
             d["mcp_servers"] = json.loads(d.pop("mcp_servers_json", "{}"))
+            d["is_orchestrator"] = bool(d.get("is_orchestrator", 0))
+            d["lint_errors"] = _agent_lint(d)
             return d
 
 
@@ -235,15 +285,17 @@ async def upsert_agent(data: dict) -> None:
         await db.execute(
             """INSERT INTO agents(id, name, description, source, agent_md,
                    file_path, repo_url, repo_path, repo_ref,
-                   model, tools_json, mcp_servers_json, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   model, tools_json, skills_json, mcp_servers_json, is_orchestrator, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, description=excluded.description,
                    source=excluded.source, agent_md=excluded.agent_md,
                    file_path=excluded.file_path, repo_url=excluded.repo_url,
                    repo_path=excluded.repo_path, repo_ref=excluded.repo_ref,
                    model=excluded.model, tools_json=excluded.tools_json,
+                   skills_json=excluded.skills_json,
                    mcp_servers_json=excluded.mcp_servers_json,
+                   is_orchestrator=excluded.is_orchestrator,
                    updated_at=excluded.updated_at""",
             (
                 data["id"], data["name"], data.get("description", ""),
@@ -252,7 +304,9 @@ async def upsert_agent(data: dict) -> None:
                 data.get("repo_path", ""), data.get("repo_ref", "main"),
                 data.get("model", ""),
                 json.dumps(data.get("tools", [])),
+                json.dumps(data.get("skills", [])),
                 json.dumps(data.get("mcp_servers", {})),
+                int(bool(data.get("is_orchestrator", False))),
             ),
         )
         await db.commit()
@@ -416,8 +470,9 @@ async def upsert_pipeline(data: dict) -> None:
             """INSERT INTO pipelines(id, name, enabled, plugin_id, board_type,
                    project_owner, project_number, board_path,
                    poll_interval, max_issues, max_retries, session_timeout_hours,
-                   models_json, allowed_repos_json, findings_json, updated_at)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+                   models_json, allowed_repos_json, findings_json, working_dir,
+                   orchestrator_agent_id, analytics_connector_id, updated_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,strftime('%Y-%m-%dT%H:%M:%SZ','now'))
                ON CONFLICT(id) DO UPDATE SET
                    name=excluded.name, enabled=excluded.enabled,
                    plugin_id=excluded.plugin_id, board_type=excluded.board_type,
@@ -426,7 +481,10 @@ async def upsert_pipeline(data: dict) -> None:
                    max_issues=excluded.max_issues, max_retries=excluded.max_retries,
                    session_timeout_hours=excluded.session_timeout_hours,
                    models_json=excluded.models_json, allowed_repos_json=excluded.allowed_repos_json,
-                   findings_json=excluded.findings_json, updated_at=excluded.updated_at""",
+                   findings_json=excluded.findings_json, working_dir=excluded.working_dir,
+                   orchestrator_agent_id=excluded.orchestrator_agent_id,
+                   analytics_connector_id=excluded.analytics_connector_id,
+                   updated_at=excluded.updated_at""",
             (
                 pid, data["name"], int(data.get("enabled", True)),
                 data["plugin_id"], data.get("board_type", "github"),
@@ -437,6 +495,9 @@ async def upsert_pipeline(data: dict) -> None:
                 json.dumps(data.get("models", [])),
                 json.dumps(data.get("allowed_repos", [])),
                 json.dumps(data["findings"]) if data.get("findings") else None,
+                data.get("working_dir"),
+                data.get("orchestrator_agent_id", ""),
+                data.get("analytics_connector_id", ""),
             ),
         )
         # Replace stages
@@ -444,13 +505,15 @@ async def upsert_pipeline(data: dict) -> None:
         for i, stage in enumerate(data.get("stages", [])):
             await db.execute(
                 """INSERT INTO pipeline_stages(pipeline_id, stage_index, column_name, actor,
-                       agent_id, task_prompt, prompt, on_success, on_failure, on_timeout, env_json)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?)""",
+                       agent_id, task_prompt, prompt, on_success, on_failure, on_failure_label,
+                       on_timeout, env_json)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     pid, i, stage["column"], stage.get("actor", "ai"),
                     stage.get("agent_id", ""), stage.get("task_prompt", ""),
                     stage.get("prompt", ""), stage.get("on_success", ""),
-                    stage.get("on_failure", ""), stage.get("on_timeout", ""),
+                    stage.get("on_failure", ""), stage.get("on_failure_label", ""),
+                    stage.get("on_timeout", ""),
                     json.dumps(stage.get("env", {})),
                 ),
             )
@@ -504,12 +567,12 @@ async def list_pipeline_runs(pipeline_id: str, limit: int = 50) -> list[dict]:
 async def add_pipeline_run_item(run_id: str, item: dict) -> None:
     async with aiosqlite.connect(get_db_path()) as db:
         await db.execute(
-            """INSERT INTO pipeline_run_items(run_id, issue_number, issue_repo, stage,
+            """INSERT INTO pipeline_run_items(run_id, issue_number, issue_repo, issue_title, stage,
                    status, started_at, ended_at, duration_s, model, cost_usd, session_id, error_message)
-               VALUES(?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                run_id, item["issue_number"], item["issue_repo"], item["stage"],
-                item["status"], item.get("started_at"), item.get("ended_at"),
+                run_id, item["issue_number"], item["issue_repo"], item.get("issue_title"),
+                item["stage"], item["status"], item.get("started_at"), item.get("ended_at"),
                 item.get("duration_s"), item.get("model"), item.get("cost_usd"),
                 item.get("session_id"), item.get("error_message"),
             ),
@@ -523,6 +586,119 @@ async def get_pipeline_run_items(run_id: str) -> list[dict]:
         async with db.execute(
             "SELECT * FROM pipeline_run_items WHERE run_id=? ORDER BY started_at",
             (run_id,),
+        ) as cur:
+            return [dict(r) async for r in cur]
+
+
+async def get_pipeline_sessions(pipeline_id: str, days: int = 7) -> dict:
+    """Return run items for a pipeline with aggregated summary.
+
+    days=0 means no time filter (all time). Summary is computed from the DB
+    (not from the truncated session list) to stay accurate with large histories.
+    """
+    days = max(0, days)  # reject negatives
+    async with aiosqlite.connect(get_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+
+        # Parameterize the time modifier to avoid string interpolation
+        time_params: tuple = (pipeline_id,)
+        time_clause = ""
+        if days > 0:
+            time_clause = "AND ri.started_at >= datetime('now', ?)"
+            time_params = (pipeline_id, f"-{days} days")
+
+        # ── Aggregate totals from DB (accurate over full history) ─────────────
+        async with db.execute(
+            f"""SELECT
+                       COUNT(*) as total,
+                       SUM(CASE WHEN ri.status IN ('success','completed','done') THEN 1 ELSE 0 END) as succeeded,
+                       SUM(ri.cost_usd) as total_cost_usd,
+                       AVG(ri.cost_usd) as avg_cost_usd,
+                       AVG(ri.duration_s) as avg_duration_s
+                FROM pipeline_run_items ri
+                JOIN pipeline_runs pr ON ri.run_id = pr.id
+                WHERE pr.pipeline_id = ? {time_clause}""",
+            time_params,
+        ) as cur:
+            agg = dict(await cur.fetchone() or {})
+
+        total = agg.get("total") or 0
+        succeeded = agg.get("succeeded") or 0
+
+        # Aggregate by stage
+        async with db.execute(
+            f"""SELECT ri.stage,
+                       COUNT(*) as count,
+                       SUM(CASE WHEN ri.status IN ('success','completed','done') THEN 1 ELSE 0 END) as succeeded,
+                       SUM(ri.cost_usd) as cost_usd,
+                       AVG(ri.duration_s) as avg_duration_s
+                FROM pipeline_run_items ri
+                JOIN pipeline_runs pr ON ri.run_id = pr.id
+                WHERE pr.pipeline_id = ? {time_clause}
+                GROUP BY ri.stage
+                ORDER BY count DESC""",
+            time_params,
+        ) as cur:
+            by_stage = {r["stage"]: dict(r) async for r in cur}
+
+        # Aggregate by model
+        async with db.execute(
+            f"""SELECT COALESCE(ri.model, 'unknown') as model,
+                       COUNT(*) as count,
+                       SUM(ri.cost_usd) as cost_usd,
+                       AVG(ri.duration_s) as avg_duration_s
+                FROM pipeline_run_items ri
+                JOIN pipeline_runs pr ON ri.run_id = pr.id
+                WHERE pr.pipeline_id = ? {time_clause}
+                GROUP BY ri.model
+                ORDER BY count DESC""",
+            time_params,
+        ) as cur:
+            by_model = {r["model"]: dict(r) async for r in cur}
+
+        # ── Flat session list (display only, capped at 1000 rows) ─────────────
+        async with db.execute(
+            f"""SELECT ri.run_id, ri.issue_number, ri.issue_repo, ri.issue_title,
+                       ri.stage, ri.status, ri.started_at, ri.ended_at,
+                       ri.duration_s, ri.model, ri.cost_usd, ri.session_id, ri.error_message
+                FROM pipeline_run_items ri
+                JOIN pipeline_runs pr ON ri.run_id = pr.id
+                WHERE pr.pipeline_id = ? {time_clause}
+                ORDER BY ri.started_at DESC
+                LIMIT 1000""",
+            time_params,
+        ) as cur:
+            sessions = [dict(r) async for r in cur]
+
+        return {
+            "summary": {
+                "total": total,
+                "succeeded": succeeded,
+                "failed": total - succeeded,
+                "success_rate": round(succeeded / total * 100, 1) if total else 0.0,
+                "total_cost_usd": round(agg.get("total_cost_usd") or 0, 6),
+                "avg_cost_usd": round(agg.get("avg_cost_usd") or 0, 6),
+                "avg_duration_s": round(agg.get("avg_duration_s") or 0, 1),
+                "by_stage": by_stage,
+                "by_model": by_model,
+            },
+            "sessions": sessions,
+        }
+
+
+async def get_issue_run_history(pipeline_id: str, issue_number: int) -> list[dict]:
+    """All run items for a specific issue number in this pipeline, newest first."""
+    async with aiosqlite.connect(get_db_path()) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """SELECT ri.stage, ri.status, ri.started_at, ri.ended_at,
+                      ri.duration_s, ri.model, ri.cost_usd, ri.error_message
+               FROM pipeline_run_items ri
+               JOIN pipeline_runs pr ON ri.run_id = pr.id
+               WHERE pr.pipeline_id = ? AND ri.issue_number = ?
+               ORDER BY ri.started_at DESC
+               LIMIT 100""",
+            (pipeline_id, issue_number),
         ) as cur:
             return [dict(r) async for r in cur]
 

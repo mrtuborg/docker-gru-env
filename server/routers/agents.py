@@ -25,7 +25,15 @@ def parse_agent_md(content: str) -> dict:
             try:
                 frontmatter = yaml.safe_load(parts[1]) or {}
             except yaml.YAMLError:
+                # Fall back to simple line-by-line parsing for unquoted colons
                 frontmatter = {}
+                for line in parts[1].splitlines():
+                    if ":" in line:
+                        k, _, v = line.partition(":")
+                        k = k.strip()
+                        v = v.strip().strip('"').strip("'")
+                        if k and v:
+                            frontmatter[k] = v
             body = parts[2].strip()
         else:
             frontmatter = {}
@@ -39,6 +47,8 @@ def parse_agent_md(content: str) -> dict:
         "description": frontmatter.get("description", ""),
         "model": frontmatter.get("model", ""),
         "tools": frontmatter.get("tools", []),
+        "skills": frontmatter.get("skills", []),
+        "is_orchestrator": bool(frontmatter.get("is_orchestrator", False)),
         "mcp_servers": frontmatter.get("mcp-servers", frontmatter.get("mcp_servers", {})),
         "body": body,
         "frontmatter": frontmatter,
@@ -56,6 +66,10 @@ def build_agent_md(data: dict) -> str:
         fm["model"] = data["model"]
     if data.get("tools"):
         fm["tools"] = data["tools"]
+    if data.get("skills"):
+        fm["skills"] = data["skills"]
+    if data.get("is_orchestrator"):
+        fm["is_orchestrator"] = True
     if data.get("mcp_servers"):
         fm["mcp-servers"] = data["mcp_servers"]
 
@@ -85,6 +99,8 @@ class AgentCreate(BaseModel):
     repo_ref: str = "main"
     model: str = ""
     tools: list = []
+    skills: list = []
+    is_orchestrator: bool = False
     mcp_servers: dict = {}
 
 
@@ -94,6 +110,8 @@ class AgentUpdate(BaseModel):
     agent_md: Optional[str] = None
     model: Optional[str] = None
     tools: Optional[list] = None
+    skills: Optional[list] = None
+    is_orchestrator: Optional[bool] = None
     mcp_servers: Optional[dict] = None
 
 
@@ -158,12 +176,19 @@ async def update(agent_id: str, body: AgentUpdate):
     for k, v in body.dict(exclude_unset=True).items():
         merged[k] = v
 
-    # Re-parse frontmatter if agent_md changed
+    # Re-parse frontmatter if agent_md changed — only override a field if
+    # frontmatter actually declares it (non-empty), to avoid wiping explicit values.
     if "agent_md" in body.dict(exclude_unset=True) and merged["agent_md"]:
         parsed = parse_agent_md(merged["agent_md"])
-        merged["model"] = parsed.get("model", merged.get("model", ""))
-        merged["tools"] = parsed.get("tools", merged.get("tools", []))
-        merged["mcp_servers"] = parsed.get("mcp_servers", merged.get("mcp_servers", {}))
+        fm = parsed.get("frontmatter", {})
+        if parsed.get("model"):
+            merged["model"] = parsed["model"]
+        if parsed.get("tools"):
+            merged["tools"] = parsed["tools"]
+        if "skills" in fm:  # explicitly declared in frontmatter
+            merged["skills"] = parsed["skills"]
+        if parsed.get("mcp_servers"):
+            merged["mcp_servers"] = parsed["mcp_servers"]
 
     await upsert_agent(merged)
     return await get_agent(agent_id)

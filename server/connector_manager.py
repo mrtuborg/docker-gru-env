@@ -43,7 +43,7 @@ class ConnectorManager:
 
     @staticmethod
     def _import_plugins() -> None:
-        from .connectors import github_connector, copilot_connector, azure_connector, obsidian_connector  # noqa: F401
+        from .connectors import github_connector, copilot_connector, azure_connector, obsidian_connector, analytics_connector  # noqa: F401
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 

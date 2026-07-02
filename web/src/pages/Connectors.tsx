@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { GitBranch, Bot, Cloud, FileText, Plus, RefreshCw, Pencil, Trash2, X, Save, Loader2 } from 'lucide-react'
+import { GitBranch, Bot, Cloud, FileText, Plus, RefreshCw, Pencil, Trash2, X, Save, Loader2, Database } from 'lucide-react'
 import HealthBadge from '../components/HealthBadge'
 import OAuthModal from '../components/OAuthModal'
 import ConnectorConfigForm from '../components/ConnectorConfigForm'
 
 const TYPE_META: Record<string, { icon: any; color: string; label: string }> = {
-  github:   { icon: GitBranch, color:'#58a6ff', label:'GitHub' },
-  copilot:  { icon: Bot,       color:'#3fb950', label:'GitHub Copilot' },
-  azure:    { icon: Cloud,     color:'#79c0ff', label:'Azure Storage' },
-  obsidian: { icon: FileText,  color:'#bc8cff', label:'Obsidian Kanban' },
+  github:    { icon: GitBranch, color: '#58a6ff', label: 'GitHub' },
+  copilot:   { icon: Bot,       color: '#3fb950', label: 'GitHub Copilot' },
+  azure:     { icon: Cloud,     color: '#79c0ff', label: 'Azure Storage' },
+  obsidian:  { icon: FileText,  color: '#bc8cff', label: 'Obsidian Kanban' },
+  analytics: { icon: Database,  color: '#f97316', label: 'Analytics DB' },
 }
 
 const PLUGIN_TYPES = Object.entries(TYPE_META).map(([id, m]) => ({ id, ...m }))
