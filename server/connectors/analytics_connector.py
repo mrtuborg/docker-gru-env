@@ -327,6 +327,12 @@ class AnalyticsConnector(GruConnector):
         host = self._config.get("host", "")
         if not host:
             return ""                        # misconfigured — caller will skip connect
+
+        # Translate loopback addresses to host.docker.internal so that
+        # "localhost" entered in the UI reaches the host machine, not the container.
+        if host in ("localhost", "127.0.0.1", "::1"):
+            host = "host.docker.internal"
+
         port = int(self._config.get("port", 5432))
         db   = self._config.get("database", "gru_analytics")
         user = self._config.get("user", "gru")

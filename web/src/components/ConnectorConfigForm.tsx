@@ -82,7 +82,7 @@ const PLUGIN_FIELDS: Record<string, Field[]> = {
   ],
   analytics: [
     { key: 'host',     label: 'PostgreSQL Host / IP', type: 'text',   placeholder: '192.168.1.100 or hostname', required: true, wizard: true,
-      hint: 'Hostname or IP of the PostgreSQL server. Use Docker container name for containers on the same network.' },
+      hint: 'Hostname, IP, or container name. Use localhost/127.0.0.1 to reach the host machine, or a Docker container name for containers on the same network.' },
     { key: 'port',     label: 'Port',                type: 'number', placeholder: '5432',           defaultValue: 5432,            wizard: true },
     { key: 'database', label: 'Database',            type: 'text',   placeholder: 'gru_analytics',  defaultValue: 'gru_analytics', wizard: true },
     { key: 'user',     label: 'User',                type: 'text',   placeholder: 'gru',             defaultValue: 'gru',           wizard: true,
