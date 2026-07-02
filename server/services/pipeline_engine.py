@@ -636,11 +636,13 @@ class PipelineEngine:
         gh_host = _gh_host_for(plugin_id)
         working_dir = pipeline.get("working_dir") or None
 
-        cmd = ["timeout", str(timeout_secs), "gh", "copilot", "--"]
+        cmd = ["timeout", str(timeout_secs), "copilot"]
         if model:
             cmd.extend(["--model", model])
         if agent_name:
             cmd.extend(["--agent", agent_name])
+        # --yolo = --allow-all-tools --allow-all-paths --allow-all-urls
+        # --no-ask-user disables the ask_user tool so agent works autonomously
         cmd.extend(["-p", prompt, "--yolo", "--no-ask-user"])
 
         env = {**os.environ, "GH_HOST": gh_host}
@@ -659,7 +661,7 @@ class PipelineEngine:
             stdout, _ = await proc.communicate()
             exit_code = proc.returncode or 0
         except FileNotFoundError:
-            self._emit(pipeline["id"], "error", "gh CLI not found — is GitHub CLI installed?")
+            self._emit(pipeline["id"], "error", "copilot CLI not found — ensure the Copilot CLI is installed in the container")
             return SessionResult(exit_code=127, duration_s=time.monotonic() - start)
         except Exception as e:
             self._emit(pipeline["id"], "error", f"Session subprocess error: {e}")
