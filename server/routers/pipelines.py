@@ -282,7 +282,7 @@ async def get_status(pipeline_id: str, request: Request):
                 stages = {s.get("column") or s.get("column_name", "") for s in (p.get("stages") or [])}
                 queued = [
                     {"number": i.number, "repo": i.repo, "stage": i.stage,
-                     "title": i.title, "labels": i.labels}
+                     "title": i.title, "labels": i.labels, "updated_at": i.updated_at}
                     for i in issues if i.stage in stages
                 ]
         except Exception:
