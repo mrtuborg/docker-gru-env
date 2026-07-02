@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# gru-server.sh — manage the gru-server-dev container
+# gru-server — manage the gru-server-dev container
 #
 # Usage:
-#   ./gru-server.sh status               # running? port? uptime?
-#   ./gru-server.sh start                # start (create if needed)
-#   ./gru-server.sh stop                 # graceful stop
-#   ./gru-server.sh restart              # stop + start
-#   ./gru-server.sh logs                 # tail container logs
-#   ./gru-server.sh fresh                # wipe volume + recreate
-#   ./gru-server.sh rebuild              # rebuild image + fresh start
+#   ./gru-server status               # running? port? uptime?
+#   ./gru-server start                # start (create if needed)
+#   ./gru-server stop                 # graceful stop
+#   ./gru-server restart              # stop + start
+#   ./gru-server logs                 # tail container logs
+#   ./gru-server recreate             # remove container (keep volume) + recreate
+#   ./gru-server wipe                 # ⚠ remove container AND volume, then recreate
+#   ./gru-server rebuild              # rebuild image + wipe + recreate
 #
 # Flags (only apply when creating a new container):
 #   --port PORT      bind server to PORT on the host (default: 9400 / $GRU_PORT)
@@ -129,8 +130,15 @@ do_stop() {
   echo "✓ Stopped"
 }
 
-do_fresh() {
-  echo "▶ Wiping $CONTAINER and volume $VOLUME …"
+do_recreate() {
+  echo "▶ Removing $CONTAINER (volume kept) …"
+  docker rm -f "$CONTAINER" 2>/dev/null || true
+  echo "✓ Container removed — data volume preserved"
+  do_start
+}
+
+do_wipe() {
+  echo "⚠  Wiping $CONTAINER AND volume $VOLUME — all data will be lost!"
   docker rm -f "$CONTAINER" 2>/dev/null || true
   docker volume rm "$VOLUME"  2>/dev/null || true
   echo "✓ Wiped"
@@ -141,7 +149,7 @@ do_rebuild() {
   echo "▶ Rebuilding $IMAGE …"
   docker build -f "$REPO_ROOT/Dockerfile.server" -t "$IMAGE" "$REPO_ROOT"
   echo "✓ Image built"
-  do_fresh
+  do_wipe
 }
 
 # ── dispatch ──────────────────────────────────────────────────────────────────
@@ -150,9 +158,15 @@ case "$CMD" in
   start)   do_start ;;
   stop)    do_stop ;;
   restart) do_stop; do_start ;;
-  logs)    docker logs -f "$CONTAINER" ;;
-  fresh)   do_fresh ;;
-  rebuild) do_rebuild ;;
+  logs)     docker logs -f "$CONTAINER" ;;
+  recreate) do_recreate ;;
+  wipe)     do_wipe ;;
+  rebuild)  do_rebuild ;;
+  *)
+    echo "Usage: $0 {status|start|stop|restart|logs|recreate|wipe|rebuild} [--port PORT]" >&2
+    echo "  recreate — remove container, keep volume (data preserved), recreate" >&2
+    echo "  wipe     — ⚠ remove container AND volume, recreate from scratch" >&2
+    exit 1 ;;
   *)
     echo "Usage: $0 {status|start|stop|restart|logs|fresh|rebuild} [--port PORT]" >&2
     exit 1 ;;
