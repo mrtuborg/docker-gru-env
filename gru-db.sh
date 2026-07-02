@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# gru-db.sh — manage the gru-analytics-db PostgreSQL container
+#
+# Usage:
+#   ./gru-db.sh status               # running? port? uptime?
+#   ./gru-db.sh start                # start (create if needed)
+#   ./gru-db.sh stop                 # graceful stop
+#   ./gru-db.sh restart              # stop + start
+#   ./gru-db.sh logs                 # tail container logs
+#   ./gru-db.sh fresh                # wipe volume + recreate
+#   ./gru-db.sh psql                 # open psql shell inside container
+#
+# Flags (only apply when creating a new container):
+#   --port PORT      expose postgres to host on PORT (default: not exposed)
+
+set -euo pipefail
+
+CONTAINER="gru-analytics-db"
+VOLUME="gru-analytics-data"
+NETWORK="gru-network"
+HOST_PORT=""   # set by --port
+
+# ── arg parsing ───────────────────────────────────────────────────────────────
+CMD="${1:-status}"
+i=1
+while [[ $i -le $# ]]; do
+  arg="${!i}"
+  case "$arg" in
+    --port) i=$((i+1)); HOST_PORT="${!i}" ;;
+  esac
+  i=$((i+1))
+done
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+container_running() { docker inspect --format '{{.State.Running}}' "$CONTAINER" 2>/dev/null | grep -q "true"; }
+container_exists()  { docker inspect "$CONTAINER" &>/dev/null; }
+
+do_status() {
+  if ! container_exists; then
+    echo "$CONTAINER  ✗ not created"
+    echo "  Run: ./gru-db.sh start"
+    return
+  fi
+  local state; state=$(docker inspect --format '{{.State.Status}}' "$CONTAINER")
+  if container_running; then
+    local since; since=$(docker inspect --format '{{.State.StartedAt}}' "$CONTAINER" | cut -c1-19 | tr 'T' ' ')
+    local exposed; exposed=$(docker inspect --format '{{range $p,$v := .NetworkSettings.Ports}}{{if $v}}{{(index $v 0).HostPort}}{{end}}{{end}}' "$CONTAINER" 2>/dev/null)
+    echo "$CONTAINER  ✓ running  (since ${since} UTC)"
+    if [[ -n "$exposed" ]]; then
+      echo "  Host port: $exposed  →  psql -h localhost -p $exposed -U gru gru_analytics"
+    else
+      echo "  Not exposed to host  (use --port PORT when creating)"
+    fi
+  else
+    echo "$CONTAINER  ○ $state"
+  fi
+}
+
+do_start() {
+  docker network create "$NETWORK" 2>/dev/null || true
+
+  if container_running; then
+    echo "✓ $CONTAINER already running"; do_status; return
+  fi
+
+  if container_exists; then
+    echo "▶ Starting $CONTAINER …"
+    docker start "$CONTAINER"
+    docker network connect "$NETWORK" "$CONTAINER" 2>/dev/null || true
+  else
+    local port_args=()
+    if [[ -n "$HOST_PORT" ]]; then
+      port_args=(-p "${HOST_PORT}:5432")
+      echo "▶ Creating $CONTAINER (postgres exposed on host:$HOST_PORT) …"
+    else
+      echo "▶ Creating $CONTAINER (not exposed to host) …"
+    fi
+    docker run -d \
+      --name "$CONTAINER" \
+      --network "$NETWORK" \
+      "${port_args[@]+"${port_args[@]}"}" \
+      -v "${VOLUME}:/var/lib/postgresql/data" \
+      -e POSTGRES_USER=gru \
+      -e POSTGRES_PASSWORD=gru \
+      -e POSTGRES_DB=gru_analytics \
+      postgres:16-alpine
+  fi
+
+  echo -n "  Waiting for postgres"
+  for i in $(seq 1 20); do
+    if docker exec "$CONTAINER" pg_isready -U gru -q 2>/dev/null; then
+      echo " ✓"; do_status; return
+    fi
+    echo -n "."; sleep 1
+  done
+  echo ""
+  echo "  Timeout — check: docker logs $CONTAINER"
+}
+
+do_stop() {
+  if ! container_exists; then echo "✓ $CONTAINER not running"; return; fi
+  echo "▶ Stopping $CONTAINER …"
+  docker stop "$CONTAINER"
+  echo "✓ Stopped"
+}
+
+do_fresh() {
+  echo "▶ Wiping $CONTAINER and volume $VOLUME …"
+  docker rm -f "$CONTAINER" 2>/dev/null || true
+  docker volume rm "$VOLUME"  2>/dev/null || true
+  echo "✓ Wiped"
+  do_start
+}
+
+# ── dispatch ──────────────────────────────────────────────────────────────────
+case "$CMD" in
+  status)  do_status ;;
+  start)   do_start ;;
+  stop)    do_stop ;;
+  restart) do_stop; do_start ;;
+  logs)    docker logs -f "$CONTAINER" ;;
+  fresh)   do_fresh ;;
+  psql)    docker exec -it "$CONTAINER" psql -U gru gru_analytics ;;
+  *)
+    echo "Usage: $0 {status|start|stop|restart|logs|fresh|psql} [--port PORT]" >&2
+    exit 1 ;;
+esac
