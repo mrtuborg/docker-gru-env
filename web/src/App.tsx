@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Routes, Route, NavLink, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot, Wrench, Globe, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Plug, Columns3, Activity, Settings, Sun, Moon, Menu, X, Workflow, Bot, Wrench, Globe } from 'lucide-react'
 import Dashboard from './pages/Dashboard'
 import Connectors from './pages/Connectors'
 import Boards from './pages/Boards'
@@ -11,8 +11,6 @@ import PipelineLogs from './pages/PipelineLogs'
 import Agents from './pages/Agents'
 import Skills from './pages/Skills'
 import SessionsPage from './pages/Sessions'
-import Analytics from './pages/Analytics'
-import AnalyticsRun from './pages/AnalyticsRun'
 import SettingsPage from './pages/Settings'
 import Environment from './pages/Environment'
 import Wizard from './pages/Wizard'
@@ -135,7 +133,6 @@ function AppShell() {
             <NavLink to="/agents"    onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Bot size={16}/>Agents</NavLink>
             <NavLink to="/skills"    onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Wrench size={16}/>Skills</NavLink>
             <NavLink to="/sessions"  onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Activity size={16}/>Sessions</NavLink>
-            <NavLink to="/analytics" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><BarChart3 size={16}/>Analytics</NavLink>
             <NavLink to="/environment" onClick={closeSidebar} className={({isActive}) => 'nav-item' + (isActive ? ' active' : '')}><Globe size={16}/>Environment</NavLink>
           </nav>
           {/* Bottom */}
@@ -157,8 +154,6 @@ function AppShell() {
             <Route path="/agents"        element={<Agents />} />
             <Route path="/skills"        element={<Skills />} />
             <Route path="/sessions"      element={<SessionsPage />} />
-            <Route path="/analytics"     element={<Analytics />} />
-            <Route path="/analytics/run/:runId" element={<AnalyticsRun />} />
             <Route path="/environment"   element={<Environment />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/wizard"   element={<Wizard onComplete={() => { setNeedsSetup(false); navigate('/') }} />} />
