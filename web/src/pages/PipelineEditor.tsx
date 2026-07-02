@@ -164,8 +164,8 @@ function toolColor(tool: string): string {
 
 // ── Blueprint Graph (SVG-based dynamic routing diagram) ──────────────────────
 
-const CARD_W = 152
-const H_GAP = 44     // gap between cards for arrows
+const CARD_W = 164
+const H_GAP = 52     // gap between cards for arrows
 
 interface GraphEdge { from: number; to: number; type: 'success' | 'failure' }
 
@@ -261,8 +261,8 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
   return (
     <div style={{ overflowX:'auto', paddingBottom:8 }}>
       <div ref={containerRef} style={{ position:'relative', display:'inline-block', minWidth:'max-content' }}>
-        {/* Cards row */}
-        <div style={{ display:'flex', alignItems:'flex-start', gap:0, paddingTop: svgPaddingTop }}>
+        {/* Cards row — stretch equalises all card heights so arrows stay horizontal */}
+        <div style={{ display:'flex', alignItems:'stretch', gap: H_GAP, paddingTop: svgPaddingTop }}>
           {stages.map((stage, i) => {
             const ag = stage.agent_id ? agentMap[stage.agent_id] : null
             const isHuman = stage.actor === 'human'
@@ -270,122 +270,128 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
             const hasLintErrors = ag && ag.lint_errors.length > 0
 
             return (
-              <div key={i} style={{ display:'flex', alignItems:'center' }}>
-                <div
-                  ref={el => { cardRefs.current[i] = el }}
-                  onClick={() => onEditStage(i)}
-                  title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
-                  style={{
-                    width: CARD_W, borderRadius:8,
-                    border: hasLintErrors
-                      ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
-                      : '1px solid var(--border)',
-                    background: hasLintErrors
-                      ? 'color-mix(in srgb, var(--yellow) 5%, var(--surface))'
-                      : isHuman
-                        ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
-                        : 'var(--surface)',
-                    cursor:'pointer', overflow:'hidden', flexShrink:0,
-                    display:'flex', flexDirection:'column',
-                    transition:'border-color 0.15s, box-shadow 0.15s',
-                    opacity: hasLintErrors ? 0.8 : 1,
-                  }}
-                  onMouseEnter={e => {
-                    ;(e.currentTarget as HTMLDivElement).style.borderColor = hasLintErrors ? 'var(--yellow)' : 'var(--accent)'
-                    ;(e.currentTarget as HTMLDivElement).style.boxShadow = `0 0 0 3px color-mix(in srgb, ${hasLintErrors ? 'var(--yellow)' : 'var(--accent)'} 15%, transparent)`
-                  }}
-                  onMouseLeave={e => {
-                    ;(e.currentTarget as HTMLDivElement).style.borderColor = hasLintErrors ? 'color-mix(in srgb, var(--yellow) 60%, transparent)' : 'var(--border)'
-                    ;(e.currentTarget as HTMLDivElement).style.boxShadow = 'none'
-                  }}
-                >
-                  {/* Header */}
+              <div
+                key={i}
+                ref={el => { cardRefs.current[i] = el }}
+                onClick={() => onEditStage(i)}
+                title={hasLintErrors ? `⚠ Lint errors: ${ag!.lint_errors.join('; ')}` : 'Click to edit this stage'}
+                style={{
+                  width: CARD_W, flexShrink:0,
+                  borderRadius:8,
+                  border: hasLintErrors
+                    ? '1px solid color-mix(in srgb, var(--yellow) 60%, transparent)'
+                    : '1px solid var(--border)',
+                  background: hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 5%, var(--surface))'
+                    : isHuman
+                      ? 'color-mix(in srgb, var(--muted) 8%, var(--surface))'
+                      : 'var(--surface)',
+                  cursor:'pointer', overflow:'hidden',
+                  display:'flex', flexDirection:'column',
+                  boxShadow:'0 1px 4px rgba(0,0,0,0.06)',
+                  transition:'border-color 0.15s, box-shadow 0.15s',
+                  opacity: hasLintErrors ? 0.85 : 1,
+                }}
+                onMouseEnter={e => {
+                  const el = e.currentTarget as HTMLDivElement
+                  el.style.borderColor = hasLintErrors ? 'var(--yellow)' : 'var(--accent)'
+                  el.style.boxShadow = `0 0 0 3px color-mix(in srgb, ${hasLintErrors ? 'var(--yellow)' : 'var(--accent)'} 15%, transparent)`
+                }}
+                onMouseLeave={e => {
+                  const el = e.currentTarget as HTMLDivElement
+                  el.style.borderColor = hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 60%, transparent)'
+                    : 'var(--border)'
+                  el.style.boxShadow = '0 1px 4px rgba(0,0,0,0.06)'
+                }}
+              >
+                {/* Header */}
+                <div style={{
+                  padding:'7px 10px', display:'flex', alignItems:'center', gap:6,
+                  borderBottom:'1px solid var(--border)', flexShrink:0,
+                  background: hasLintErrors
+                    ? 'color-mix(in srgb, var(--yellow) 10%, transparent)'
+                    : isHuman
+                      ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
+                      : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                }}>
                   <div style={{
-                    padding:'7px 10px', display:'flex', alignItems:'center', gap:6,
-                    borderBottom:'1px solid var(--border)', flexShrink:0,
+                    width:20, height:20, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
                     background: hasLintErrors
-                      ? 'color-mix(in srgb, var(--yellow) 10%, transparent)'
-                      : isHuman
-                        ? 'color-mix(in srgb, var(--muted) 6%, transparent)'
-                        : 'color-mix(in srgb, var(--accent) 8%, transparent)',
+                      ? 'color-mix(in srgb, var(--yellow) 25%, transparent)'
+                      : isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
+                    color: hasLintErrors ? 'var(--yellow)' : isHuman ? 'var(--muted)' : 'var(--accent)',
+                    flexShrink:0,
                   }}>
-                    <div style={{
-                      width:20, height:20, borderRadius:4, display:'flex', alignItems:'center', justifyContent:'center',
-                      background: hasLintErrors
-                        ? 'color-mix(in srgb, var(--yellow) 25%, transparent)'
-                        : isHuman ? 'var(--surface2)' : 'color-mix(in srgb, var(--accent) 20%, transparent)',
-                      color: hasLintErrors ? 'var(--yellow)' : isHuman ? 'var(--muted)' : 'var(--accent)',
-                      flexShrink:0,
-                    }}>
-                      {hasLintErrors ? <AlertTriangle size={11}/> : isHuman ? <User size={11}/> : <Bot size={11}/>}
-                    </div>
-                    <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {stage.column || '(unnamed)'}
-                    </span>
-                    <span style={{ fontSize:9, color:'var(--muted)' }}>#{i + 1}</span>
+                    {hasLintErrors ? <AlertTriangle size={11}/> : isHuman ? <User size={11}/> : <Bot size={11}/>}
                   </div>
+                  <span style={{ fontSize:12, fontWeight:700, flex:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                    {stage.column || '(unnamed)'}
+                  </span>
+                  <span style={{
+                    fontSize:9, fontWeight:700, minWidth:16, height:16,
+                    borderRadius:8, background:'var(--surface2)', color:'var(--muted)',
+                    display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0,
+                  }}>
+                    {i + 1}
+                  </span>
+                </div>
 
-                  {/* Agent */}
-                  <div style={{ padding:'8px 10px 7px', borderBottom:'1px solid var(--border)' }}>
-                    {hasLintErrors ? (
-                      <>
-                        <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
-                          {ag!.name || ag!.id}
-                        </div>
-                        <span style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>⚠ {ag!.lint_errors.length} dep error{ag!.lint_errors.length === 1 ? '' : 's'}</span>
-                      </>
-                    ) : isHuman ? (
-                      <div style={{ color:'var(--muted)', fontSize:11, paddingTop:6 }}>Human gate</div>
-                    ) : ag ? (
-                      <>
-                        <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
-                          {ag.name || ag.id}
-                        </div>
-                        {ag.model && (
-                          <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600 }}>
-                            {ag.model}
-                          </span>
-                        )}
-                      </>
-                    ) : (
-                      <div style={{ fontSize:10, color:'var(--red)', paddingTop:6 }}>No agent assigned</div>
-                    )}
-                  </div>
+                {/* Agent — fixed height section */}
+                <div style={{ padding:'8px 10px 7px', borderBottom:'1px solid var(--border)', minHeight:50, display:'flex', flexDirection:'column', justifyContent:'center' }}>
+                  {hasLintErrors ? (
+                    <>
+                      <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:3 }}>
+                        {ag!.name || ag!.id}
+                      </div>
+                      <span style={{ fontSize:10, color:'var(--yellow)', fontWeight:600 }}>⚠ {ag!.lint_errors.length} dep error{ag!.lint_errors.length === 1 ? '' : 's'}</span>
+                    </>
+                  ) : isHuman ? (
+                    <div style={{ color:'var(--muted)', fontSize:11 }}>Human gate</div>
+                  ) : ag ? (
+                    <>
+                      <div style={{ fontSize:11, fontWeight:600, color:'var(--text)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap', marginBottom:4 }}>
+                        {ag.name || ag.id}
+                      </div>
+                      {ag.model && (
+                        <span style={{ fontSize:9, padding:'1px 5px', borderRadius:3, background:'color-mix(in srgb, var(--purple) 15%, transparent)', color:'var(--purple)', fontWeight:600, alignSelf:'flex-start' }}>
+                          {ag.model}
+                        </span>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ fontSize:10, color:'var(--red)' }}>No agent assigned</div>
+                  )}
+                </div>
 
-                  {/* Tools */}
-                  <div style={{ padding:'8px 10px', borderBottom:'1px solid var(--border)' }}>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
-                      {tools.length > 0 ? tools.map(t => (
-                        <span key={t} style={{
-                          fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
-                          background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
-                          color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
-                        }}>{t}</span>
-                      )) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
-                    </div>
-                  </div>
-
-                  {/* Skills */}
-                  <div style={{ padding:'8px 10px' }}>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
-                      {ag && ag.skills.length > 0 ? ag.skills.map((sk: string) => {
-                        const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
-                        return (
-                          <span key={sk} title={sk} style={{
-                            fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
-                            background:'color-mix(in srgb, var(--green) 12%, transparent)',
-                            color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
-                          }}>{label}</span>
-                        )
-                      }) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
-                    </div>
+                {/* Tools — fixed height section */}
+                <div style={{ padding:'7px 10px', borderBottom:'1px solid var(--border)', minHeight:38, display:'flex', alignItems:'center' }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                    {tools.length > 0 ? tools.map(t => (
+                      <span key={t} style={{
+                        fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
+                        background:`color-mix(in srgb, ${toolColor(t)} 18%, transparent)`,
+                        color: toolColor(t), border:`1px solid color-mix(in srgb, ${toolColor(t)} 30%, transparent)`,
+                      }}>{t}</span>
+                    )) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
                   </div>
                 </div>
 
-                {/* Spacer between cards (arrows drawn via SVG) */}
-                {i < stages.length - 1 && (
-                  <div style={{ width: H_GAP, flexShrink:0 }} />
-                )}
+                {/* Skills — grows to fill remaining height so all cards equalise */}
+                <div style={{ padding:'7px 10px', flex:'1 0 auto', display:'flex', alignItems:'flex-start', alignContent:'flex-start' }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:3 }}>
+                    {ag && ag.skills.length > 0 ? ag.skills.map((sk: string) => {
+                      const label = sk.replace(/^skills\/[\w-]+\//, '').replace('.sh', '')
+                      return (
+                        <span key={sk} title={sk} style={{
+                          fontSize:9, padding:'2px 6px', borderRadius:3, fontWeight:600,
+                          background:'color-mix(in srgb, var(--green) 12%, transparent)',
+                          color:'var(--green)', border:'1px solid color-mix(in srgb, var(--green) 25%, transparent)',
+                        }}>{label}</span>
+                      )
+                    }) : <span style={{ fontSize:9, color:'var(--muted)' }}>—</span>}
+                  </div>
+                </div>
               </div>
             )
           })}
@@ -398,52 +404,54 @@ function BlueprintGraph({ pipeline, agentMap, onEditStage, onEdit }: {
             width={svgSize.w} height={svgSize.h + svgPaddingTop}
           >
             <defs>
-              <marker id="arrow-success" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="var(--green)" />
+              <marker id="arrow-success" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L7,3 z" fill="var(--green)" />
               </marker>
-              <marker id="arrow-failure" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="var(--red)" />
-              </marker>
-              <marker id="arrow-muted" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto">
-                <path d="M0,0 L0,6 L8,3 z" fill="var(--border)" />
+              <marker id="arrow-failure" markerWidth="7" markerHeight="7" refX="6" refY="3" orient="auto">
+                <path d="M0,0 L0,6 L7,3 z" fill="var(--red)" />
               </marker>
             </defs>
             {arrows.map((a, idx) => {
-              const color = a.type === 'success' ? 'var(--green)' : 'var(--red)'
-              const markerId = a.type === 'success' ? 'arrow-success' : 'arrow-failure'
-              const label = a.type === 'success' ? '✓' : '✗'
+              const isSuccess = a.type === 'success'
+              const color = isSuccess ? 'var(--green)' : 'var(--red)'
+              const markerId = isSuccess ? 'arrow-success' : 'arrow-failure'
+              const label = isSuccess ? '✓' : '✗'
               const adjY = a.y1 + svgPaddingTop
               const adjY2 = a.y2 + svgPaddingTop
 
               if (a.arc === 0) {
-                // Straight horizontal arrow for adjacent stages
+                // Straight horizontal arrow — adjacent stages at equal height, same Y
                 const mx = (a.x1 + a.x2) / 2
+                const ly = adjY - 7
                 return (
                   <g key={idx}>
                     <line
-                      x1={a.x1} y1={adjY} x2={a.x2 - 7} y2={adjY2}
+                      x1={a.x1 + 1} y1={adjY} x2={a.x2 - 6} y2={adjY}
                       stroke={color} strokeWidth="1.5" markerEnd={`url(#${markerId})`}
-                      strokeDasharray={a.type === 'failure' ? '4 3' : undefined}
                     />
-                    <text x={mx} y={adjY - 5} textAnchor="middle"
+                    {/* Label pill */}
+                    <rect x={mx - 7} y={ly - 8} width={14} height={12} rx={3}
+                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.95" />
+                    <text x={mx} y={ly} textAnchor="middle"
                       fontSize="9" fontWeight="700" fill={color}>{label}</text>
                   </g>
                 )
               } else {
-                // Curved arc for non-adjacent connections
-                const cy = adjY + a.arc  // control point y
+                // Cubic bezier arc — non-adjacent connections
+                const cy = adjY + a.arc
                 const cy2 = adjY2 + a.arc
                 const mx = (a.x1 + a.x2) / 2
-                const pathD = `M ${a.x1} ${adjY} C ${a.x1 + 20} ${cy}, ${a.x2 - 20} ${cy2}, ${a.x2} ${adjY2}`
-                // label midpoint on arc
+                const pathD = `M ${a.x1} ${adjY} C ${a.x1 + 24} ${cy}, ${a.x2 - 24} ${cy2}, ${a.x2} ${adjY2}`
                 const lx = mx
-                const ly = (adjY + adjY2) / 2 + a.arc * 0.8
+                const ly = (adjY + adjY2) / 2 + a.arc * 0.85
                 return (
                   <g key={idx}>
                     <path d={pathD} fill="none" stroke={color} strokeWidth="1.5"
                       markerEnd={`url(#${markerId})`}
-                      strokeDasharray={a.type === 'failure' ? '4 3' : undefined}
+                      strokeDasharray={isSuccess ? undefined : '5 3'}
                     />
+                    <rect x={lx - 7} y={ly - 8} width={14} height={12} rx={3}
+                      fill="var(--surface)" stroke={color} strokeWidth="1" opacity="0.95" />
                     <text x={lx} y={ly} textAnchor="middle"
                       fontSize="9" fontWeight="700" fill={color}>{label}</text>
                   </g>
